@@ -1,0 +1,17 @@
+[Unit]
+Description=DNS Disaster Recovery System
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/dns-disaster
+ExecStart=/usr/bin/dotnet /opt/dns-disaster/DNSDisaster.dll
+Restart=always
+RestartSec=10
+KillSignal=SIGINT
+SyslogIdentifier=dns-disaster
+Environment=ASPNETCORE_ENVIRONMENT=Production
+
+[Install]
+WantedBy=multi-user.target
