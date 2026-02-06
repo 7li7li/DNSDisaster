@@ -80,7 +80,7 @@ sudo systemctl status dns-disaster
   "Telegram": {
     "BotToken": "your_telegram_bot_token",
     "ChatId": "your_chat_id",
-    "ApiBaseUrl": "https://tg-api.7li7li.com"
+    "ApiBaseUrl": "https://tg-api.xxx.com"
   },
   "IpProvider": {
     "Username": "your_username",
@@ -103,7 +103,7 @@ sudo systemctl status dns-disaster
 **Telegram**:
 1. 与 [@BotFather](https://t.me/botfather) 创建机器人，获取 Bot Token
 2. 与 [@userinfobot](https://t.me/userinfobot) 获取 Chat ID
-3. 大陆部署使用 `https://tg-api.7li7li.com`
+3. 大陆部署使用 `https://tg-api.xxx.com`
 
 **IP Provider**:
 - 配置 `DirectIpApiUrl` 优先使用（性能更好）
@@ -185,7 +185,7 @@ chmod 755 /opt/dns-disaster/logs
 
 ```bash
 # 测试API连接
-curl https://tg-api.7li7li.com/botYOUR_BOT_TOKEN/getMe
+curl https://tg-api.xxx.com/botYOUR_BOT_TOKEN/getMe
 
 # 检查日志
 grep "Telegram" /opt/dns-disaster/logs/dns-disaster-*.log
