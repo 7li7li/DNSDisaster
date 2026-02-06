@@ -276,6 +276,60 @@ IP: 1.2.3.4
 4. **模拟故障**: 临时关闭目标端口测试故障转移
 5. **监控Telegram**: 通过通知消息了解系统运行状态
 
+## 日志管理
+
+系统使用Serilog记录日志，同时输出到控制台和文件。
+
+### 日志文件位置
+```
+logs/dns-disaster-YYYYMMDD.log
+```
+
+### 日志配置
+- **滚动策略**: 每天创建新日志文件
+- **文件大小限制**: 单个文件最大10MB
+- **保留天数**: 保留最近30天的日志
+- **文件命名**: `dns-disaster-20260206.log`
+
+### 查看日志
+
+**实时查看日志**（Linux）:
+```bash
+tail -f logs/dns-disaster-$(date +%Y%m%d).log
+```
+
+**查看最近100行**:
+```bash
+tail -n 100 logs/dns-disaster-$(date +%Y%m%d).log
+```
+
+**搜索错误日志**:
+```bash
+grep "ERR" logs/dns-disaster-*.log
+```
+
+**查看特定日期的日志**:
+```bash
+cat logs/dns-disaster-20260206.log
+```
+
+### 日志级别
+
+日志包含以下级别：
+- **DBG** (Debug): 详细的调试信息
+- **INF** (Information): 一般信息
+- **WRN** (Warning): 警告信息
+- **ERR** (Error): 错误信息
+- **FTL** (Fatal): 致命错误
+
+### 日志格式
+```
+[2026-02-06 15:30:45 INF] DNS灾难恢复系统启动中...
+[2026-02-06 15:30:46 DBG] 检测IP连通性: 1.2.3.4:12345
+[2026-02-06 15:30:47 WRN] IP 1.2.3.4 不可达 (失败 1/3)
+[2026-02-06 15:30:48 ERR] 发送Telegram通知失败: Connection timeout
+```
+
 ## 性能优化
 
 - **直接IP查询API**: 相比设备组API，性能提升约7.5倍

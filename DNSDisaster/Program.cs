@@ -1,6 +1,8 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Serilog;
+using Serilog.Events;
 using DNSDisaster.Models;
 using DNSDisaster.Services;
 
@@ -10,38 +12,54 @@ class Program
 {
     static async Task Main(string[] args)
     {
-        // 构建配置
-        var configuration = new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-            .Build();
-
-        // 绑定配置
-        var appSettings = new AppSettings();
-        configuration.Bind(appSettings);
-
-        // 验证配置
-        if (!ValidateConfiguration(appSettings))
-        {
-            Console.WriteLine("配置验证失败，请检查 appsettings.json 文件");
-            Console.WriteLine("按任意键退出...");
-            Console.ReadKey();
-            return;
-        }
-
-        // 配置服务
-        var services = new ServiceCollection();
-        ConfigureServices(services, appSettings, configuration);
-
-        // 构建服务提供者
-        var serviceProvider = services.BuildServiceProvider();
-
-        // 获取日志记录器
-        var logger = serviceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogInformation("DNS灾难恢复系统启动中...");
+        // 配置Serilog
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Debug()
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+            .MinimumLevel.Override("System", LogEventLevel.Information)
+            .Enrich.FromLogContext()
+            .WriteTo.Console(
+                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+            .WriteTo.File(
+                path: "logs/dns-disaster-.log",
+                rollingInterval: RollingInterval.Day,
+                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}",
+                retainedFileCountLimit: 30,
+                fileSizeLimitBytes: 10485760, // 10MB
+                rollOnFileSizeLimit: true)
+            .CreateLogger();
 
         try
         {
+            Log.Information("DNS灾难恢复系统启动中...");
+
+            // 构建配置
+            var configuration = new ConfigurationBuilder()
+                .SetBasePath(Directory.GetCurrentDirectory())
+                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                .Build();
+
+            // 绑定配置
+            var appSettings = new AppSettings();
+            configuration.Bind(appSettings);
+
+            // 验证配置
+            if (!ValidateConfiguration(appSettings))
+            {
+                Log.Error("配置验证失败，请检查 appsettings.json 文件");
+                Console.WriteLine("配置验证失败，请检查 appsettings.json 文件");
+                Console.WriteLine("按任意键退出...");
+                Console.ReadKey();
+                return;
+            }
+
+            // 配置服务
+            var services = new ServiceCollection();
+            ConfigureServices(services, appSettings, configuration);
+
+            // 构建服务提供者
+            var serviceProvider = services.BuildServiceProvider();
+
             // 启动监控服务
             var monitoringService = serviceProvider.GetRequiredService<DnsMonitoringService>();
             
@@ -49,7 +67,7 @@ class Program
             Console.CancelKeyPress += (sender, e) =>
             {
                 e.Cancel = true;
-                logger.LogInformation("收到退出信号，正在停止服务...");
+                Log.Information("收到退出信号，正在停止服务...");
                 monitoringService.Stop();
             };
 
@@ -57,12 +75,13 @@ class Program
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "应用程序启动失败");
+            Log.Fatal(ex, "应用程序启动失败");
             Console.WriteLine($"启动失败: {ex.Message}");
         }
         finally
         {
-            serviceProvider.Dispose();
+            Log.Information("DNS灾难恢复系统已停止");
+            Log.CloseAndFlush();
         }
 
         Console.WriteLine("按任意键退出...");
@@ -71,11 +90,11 @@ class Program
 
     private static void ConfigureServices(IServiceCollection services, AppSettings appSettings, IConfiguration configuration)
     {
-        // 添加日志
+        // 添加Serilog日志
         services.AddLogging(builder =>
         {
-            builder.AddConfiguration(configuration.GetSection("Logging"));
-            builder.AddConsole();
+            builder.ClearProviders();
+            builder.AddSerilog(dispose: true);
         });
 
         // 添加HttpClient
@@ -138,9 +157,10 @@ class Program
 
         if (errors.Any())
         {
-            Console.WriteLine("配置错误:");
+            Log.Error("配置错误:");
             foreach (var error in errors)
             {
+                Log.Error("- {Error}", error);
                 Console.WriteLine($"- {error}");
             }
             return false;

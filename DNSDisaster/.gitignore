@@ -447,6 +447,7 @@ appsettings.*.json
 # Log files
 *.log
 logs/
+logs/
 
 # Temporary files
 *.tmp

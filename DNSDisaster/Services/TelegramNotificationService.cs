@@ -1,6 +1,6 @@
+using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Telegram.Bot;
-using Telegram.Bot.Types;
 using DNSDisaster.Models;
 
 namespace DNSDisaster.Services;
@@ -15,40 +15,51 @@ public interface ITelegramNotificationService
 
 public class TelegramNotificationService : ITelegramNotificationService
 {
-    private readonly TelegramBotClient _botClient;
+    private readonly HttpClient _httpClient;
     private readonly TelegramSettings _settings;
     private readonly ILogger<TelegramNotificationService> _logger;
+    private readonly string _apiUrl;
 
-    public TelegramNotificationService(TelegramSettings settings, ILogger<TelegramNotificationService> logger)
+    public TelegramNotificationService(HttpClient httpClient, TelegramSettings settings, ILogger<TelegramNotificationService> logger)
     {
+        _httpClient = httpClient;
         _settings = settings;
         _logger = logger;
         
-        // 使用自定义API地址（支持大陆访问）
-        var httpClient = new HttpClient
-        {
-            BaseAddress = new Uri(settings.ApiBaseUrl)
-        };
+        // 构建完整的API URL
+        var baseUrl = settings.ApiBaseUrl.TrimEnd('/');
+        _apiUrl = $"{baseUrl}/bot{settings.BotToken}";
         
-        _botClient = new TelegramBotClient(settings.BotToken, httpClient);
-        
-        _logger.LogInformation("Telegram Bot 初始化完成，使用API地址: {ApiBaseUrl}", settings.ApiBaseUrl);
+        _logger.LogInformation("Telegram Bot 初始化完成，使用API地址: {ApiBaseUrl}", baseUrl);
     }
 
     public async Task SendNotificationAsync(string message)
     {
         try
         {
-            // 支持数字ID和@username格式
-            var chatId = long.TryParse(_settings.ChatId, out var numericId) 
-                ? new ChatId(numericId) 
-                : new ChatId(_settings.ChatId);
+            var fullMessage = $"🔔 DNS灾难恢复系统通知\n\n{message}\n\n⏰ 时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss}";
+            
+            var requestBody = new
+            {
+                chat_id = _settings.ChatId,
+                text = fullMessage,
+                parse_mode = "HTML"
+            };
 
-            await _botClient.SendTextMessageAsync(
-                chatId: chatId,
-                text: $"🔔 DNS灾难恢复系统通知\n\n{message}\n\n⏰ 时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss}"
-            );
-            _logger.LogInformation("Telegram通知发送成功: {Message}", message);
+            var json = JsonSerializer.Serialize(requestBody);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            
+            var response = await _httpClient.PostAsync($"{_apiUrl}/sendMessage", content);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("Telegram通知发送成功: {Message}", message);
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Telegram通知发送失败: {StatusCode}, {Content}", response.StatusCode, errorContent);
+            }
         }
         catch (Exception ex)
         {

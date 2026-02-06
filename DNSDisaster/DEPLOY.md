@@ -117,6 +117,19 @@ sudo systemctl status dns-disaster
 
 ### 7. 查看日志
 
+**查看文件日志**:
+```bash
+# 实时查看今天的日志
+tail -f /opt/dns-disaster/logs/dns-disaster-$(date +%Y%m%d).log
+
+# 查看最近100行
+tail -n 100 /opt/dns-disaster/logs/dns-disaster-$(date +%Y%m%d).log
+
+# 搜索错误
+grep "ERR" /opt/dns-disaster/logs/dns-disaster-*.log
+```
+
+**查看systemd日志**:
 ```bash
 # 实时查看日志
 sudo journalctl -u dns-disaster -f
@@ -127,6 +140,8 @@ sudo journalctl -u dns-disaster -n 100
 # 查看今天的日志
 sudo journalctl -u dns-disaster --since today
 ```
+
+**注意**: 系统会同时输出日志到文件和systemd journal，建议主要查看文件日志，因为它有更好的格式和保留策略。
 
 ## 常用命令
 
