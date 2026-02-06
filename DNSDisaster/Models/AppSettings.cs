@@ -15,7 +15,6 @@ public class DNSDisasterSettings
     public string BackupDomain { get; set; } = string.Empty;
     public int CheckIntervalSeconds { get; set; } = 30;
     public int FailureThreshold { get; set; } = 3;
-    public int RecoveryCheckIntervalSeconds { get; set; } = 60;
 }
 
 public class CloudflareSettings

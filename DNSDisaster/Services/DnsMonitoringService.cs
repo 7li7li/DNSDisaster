@@ -21,8 +21,9 @@ public class DnsMonitoringService
     private readonly ILogger<DnsMonitoringService> _logger;
 
     private int _consecutiveFailures = 0;
-    private DnsRecordState _currentState = DnsRecordState.ARecord;
-    private string? _lastKnownIp;
+    private DnsRecordState _currentState = DnsRecordState.Unknown;
+    private string? _currentMonitoredIp;
+    private bool _hasCheckedDnsConsistency = false; // 标记是否已检测过DNS一致性
     private readonly CancellationTokenSource _cancellationTokenSource = new();
 
     public DnsMonitoringService(
@@ -46,26 +47,10 @@ public class DnsMonitoringService
     public async Task StartMonitoringAsync()
     {
         _logger.LogInformation("开始DNS监控服务...");
-        await _telegramService.SendNotificationAsync("DNS灾难恢复系统已启动");
-
-        // 获取初始IP地址
-        _lastKnownIp = await _ipProviderService.GetCurrentIpAsync();
-        if (string.IsNullOrEmpty(_lastKnownIp))
-        {
-            _logger.LogError("无法获取初始IP地址");
-            await _telegramService.SendErrorNotificationAsync("无法获取初始IP地址，请检查IP提供商配置");
-            return;
-        }
-
-        _logger.LogInformation("获取到初始IP地址: {IpAddress}", _lastKnownIp);
+        await _telegramService.SendNotificationAsync("🚀 DNS灾难恢复系统已启动");
 
         // 启动主监控循环
-        var monitoringTask = MonitoringLoopAsync(_cancellationTokenSource.Token);
-        
-        // 启动恢复检测循环
-        var recoveryTask = RecoveryCheckLoopAsync(_cancellationTokenSource.Token);
-
-        await Task.WhenAny(monitoringTask, recoveryTask);
+        await MonitoringLoopAsync(_cancellationTokenSource.Token);
     }
 
     public void Stop()
@@ -80,46 +65,89 @@ public class DnsMonitoringService
         {
             try
             {
-                bool isConnected;
-                string targetDescription;
-
-                if (_currentState == DnsRecordState.ARecord && !string.IsNullOrEmpty(_lastKnownIp))
+                // 步骤1: 通过API获取当前IP
+                var currentIp = await _ipProviderService.GetCurrentIpAsync();
+                
+                if (string.IsNullOrEmpty(currentIp))
                 {
-                    // A记录状态：直接检测IP地址
-                    isConnected = await _tcpPingService.PingAsync(_lastKnownIp, _settings.PrimaryPort);
-                    targetDescription = $"{_lastKnownIp}:{_settings.PrimaryPort}";
-                }
-                else
-                {
-                    // CNAME状态或无IP：检测主域名
-                    isConnected = await _tcpPingService.PingAsync(_settings.PrimaryDomain, _settings.PrimaryPort);
-                    targetDescription = $"{_settings.PrimaryDomain}:{_settings.PrimaryPort}";
+                    _logger.LogWarning("无法获取当前IP地址，等待下次检测");
+                    await Task.Delay(TimeSpan.FromSeconds(_settings.CheckIntervalSeconds), cancellationToken);
+                    continue;
                 }
 
-                if (isConnected)
+                // 检测IP是否变化
+                if (currentIp != _currentMonitoredIp)
                 {
-                    // 连接成功，重置失败计数
+                    _logger.LogInformation("检测到IP变化: {OldIp} → {NewIp}", _currentMonitoredIp ?? "无", currentIp);
+                    _currentMonitoredIp = currentIp;
+                    _consecutiveFailures = 0; // 重置失败计数
+                    _hasCheckedDnsConsistency = false; // IP变化后需要重新检测DNS一致性
+                }
+
+                // 步骤2: TCPing检测该IP是否联通
+                _logger.LogDebug("检测IP连通性: {IpAddress}:{Port}", currentIp, _settings.PrimaryPort);
+                var isIpReachable = await _tcpPingService.PingAsync(currentIp, _settings.PrimaryPort);
+
+                if (isIpReachable)
+                {
+                    // 步骤3: IP可达，只在第一次检查主域名是否指向该IP
+                    _logger.LogDebug("✅ IP {IpAddress} 可达", currentIp);
+                    
+                    // 重置失败计数
                     if (_consecutiveFailures > 0)
                     {
-                        _logger.LogInformation("连接恢复，重置失败计数 - {Target}", targetDescription);
+                        _logger.LogInformation("连接恢复，重置失败计数");
                         _consecutiveFailures = 0;
                     }
-                    else
+
+                    // 只在第一次或IP变化后检测DNS一致性
+                    if (!_hasCheckedDnsConsistency)
                     {
-                        _logger.LogDebug("TCP连接正常 - {Target}", targetDescription);
+                        _logger.LogInformation("[{Timestamp}] 首次检测DNS一致性: IP={IpAddress}", 
+                            DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), currentIp);
+                        
+                        // 解析主域名当前的IP
+                        var domainIp = await _dnsResolverService.GetARecordAsync(_settings.PrimaryDomain);
+                        
+                        if (string.IsNullOrEmpty(domainIp))
+                        {
+                            _logger.LogDebug("[{Timestamp}] 主域名 {Domain} 无法解析为IP（可能是CNAME），准备切换到A记录", 
+                                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), _settings.PrimaryDomain);
+                            
+                            // 尝试切换到A记录
+                            await SwitchToARecordAsync(currentIp, "主域名无法解析为IP");
+                        }
+                        else if (domainIp != currentIp)
+                        {
+                            _logger.LogDebug("[{Timestamp}] 主域名IP不一致: 域名={DomainIp}, 当前={CurrentIp}", 
+                                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), domainIp, currentIp);
+                            
+                            // IP不一致，更新A记录
+                            await SwitchToARecordAsync(currentIp, $"IP不一致 ({domainIp} → {currentIp})");
+                        }
+                        else
+                        {
+                            _logger.LogDebug("[{Timestamp}] 主域名IP一致: {IpAddress}，无需更新", 
+                                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), currentIp);
+                            _currentState = DnsRecordState.ARecord;
+                        }
+                        
+                        // 标记已检测过
+                        _hasCheckedDnsConsistency = true;
                     }
                 }
                 else
                 {
-                    // 连接失败，增加失败计数
+                    // IP不可达，增加失败计数
                     _consecutiveFailures++;
-                    _logger.LogWarning("连接失败 #{FailureCount}/{Threshold} - {Target}", 
-                        _consecutiveFailures, _settings.FailureThreshold, targetDescription);
+                    _logger.LogWarning("❌ IP {IpAddress} 不可达 (失败 {FailureCount}/{Threshold})", 
+                        currentIp, _consecutiveFailures, _settings.FailureThreshold);
 
-                    // 检查是否达到故障转移阈值
-                    if (_consecutiveFailures >= _settings.FailureThreshold && _currentState == DnsRecordState.ARecord)
+                    // 达到失败阈值，切换到CNAME
+                    if (_consecutiveFailures >= _settings.FailureThreshold)
                     {
-                        await TriggerFailoverAsync();
+                        await SwitchToCnameAsync();
+                        _consecutiveFailures = 0; // 重置计数，继续监控新IP
                     }
                 }
 
@@ -138,160 +166,76 @@ public class DnsMonitoringService
         }
     }
 
-    private async Task RecoveryCheckLoopAsync(CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            try
-            {
-                // 只有在CNAME状态时才检查恢复
-                if (_currentState == DnsRecordState.CnameRecord)
-                {
-                    await CheckForRecoveryAsync();
-                }
-
-                await Task.Delay(TimeSpan.FromSeconds(_settings.RecoveryCheckIntervalSeconds), cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "恢复检测循环中发生异常");
-                await Task.Delay(TimeSpan.FromSeconds(_settings.RecoveryCheckIntervalSeconds), cancellationToken);
-            }
-        }
-    }
-
-    private async Task TriggerFailoverAsync()
+    private async Task SwitchToARecordAsync(string ipAddress, string reason)
     {
         try
         {
-            _logger.LogWarning("触发故障转移: 开始检查新IP可用性");
+            _logger.LogInformation("准备切换到A记录: IP={IpAddress}, 原因={Reason}", ipAddress, reason);
             
-            // 首先尝试获取最新IP
-            var currentIp = await _ipProviderService.GetCurrentIpAsync();
+            var success = await _cloudflareService.SwitchToARecordAsync(ipAddress);
             
-            if (!string.IsNullOrEmpty(currentIp))
+            if (success)
             {
-                _logger.LogInformation("获取到最新IP: {IpAddress}，测试连通性", currentIp);
-                
-                // 检查IP是否发生变化
-                if (currentIp != _lastKnownIp)
-                {
-                    _logger.LogInformation("检测到IP变化: {OldIp} → {NewIp}", _lastKnownIp, currentIp);
-                    _lastKnownIp = currentIp;
-                    await _telegramService.SendNotificationAsync($"故障转移时检测到IP变化: {_lastKnownIp} → {currentIp}");
-                }
-                
-                // 测试新IP是否可用
-                var isNewIpAvailable = await _tcpPingService.PingAsync(currentIp, _settings.PrimaryPort);
-                
-                if (isNewIpAvailable)
-                {
-                    _logger.LogInformation("新IP {IpAddress} 可用，直接切换到新A记录", currentIp);
-                    
-                    var success = await _cloudflareService.SwitchToARecordAsync(currentIp);
-                    
-                    if (success)
-                    {
-                        _currentState = DnsRecordState.ARecord;
-                        _consecutiveFailures = 0;
-                        await _telegramService.SendNotificationAsync($"🔄 智能故障转移\n\n域名: {_settings.PrimaryDomain}\n新IP: {currentIp}\n状态: 已直接切换到新A记录\n原因: 检测到新IP可用");
-                        _logger.LogInformation("智能故障转移成功: 直接切换到新A记录 {IpAddress}", currentIp);
-                        return;
-                    }
-                    else
-                    {
-                        _logger.LogError("切换到新A记录失败，将尝试CNAME故障转移");
-                    }
-                }
-                else
-                {
-                    _logger.LogWarning("新IP {IpAddress} 不可用，将切换到CNAME备用域名", currentIp);
-                }
+                _currentState = DnsRecordState.ARecord;
+                await _telegramService.SendNotificationAsync(
+                    $"✅ DNS记录已更新\n\n" +
+                    $"域名: {_settings.PrimaryDomain}\n" +
+                    $"类型: A记录\n" +
+                    $"IP: {ipAddress}\n" +
+                    $"原因: {reason}");
+                _logger.LogInformation("成功切换到A记录: {IpAddress}", ipAddress);
             }
             else
             {
-                _logger.LogWarning("无法获取最新IP，将切换到CNAME备用域名");
+                _logger.LogError("切换到A记录失败");
+                await _telegramService.SendErrorNotificationAsync($"切换到A记录失败: {ipAddress}");
             }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "切换到A记录时发生异常");
+            await _telegramService.SendErrorNotificationAsync($"切换A记录异常: {ex.Message}");
+        }
+    }
+
+    private async Task SwitchToCnameAsync()
+    {
+        try
+        {
+            // 如果已经是CNAME状态，不重复切换
+            if (_currentState == DnsRecordState.CnameRecord)
+            {
+                _logger.LogDebug("已经是CNAME状态，跳过切换");
+                return;
+            }
+
+            _logger.LogWarning("⚠️ 触发故障转移: 切换到CNAME备用域名 {BackupDomain}", _settings.BackupDomain);
             
-            // 如果新IP不可用或获取失败，则切换到CNAME备用域名
-            _logger.LogWarning("执行CNAME故障转移: 切换到备用域名 {BackupDomain}", _settings.BackupDomain);
+            var success = await _cloudflareService.SwitchToCnameAsync(_settings.BackupDomain);
             
-            var cnameSuccess = await _cloudflareService.SwitchToCnameAsync(_settings.BackupDomain);
-            
-            if (cnameSuccess)
+            if (success)
             {
                 _currentState = DnsRecordState.CnameRecord;
-                await _telegramService.SendFailoverNotificationAsync(_settings.PrimaryDomain, _settings.BackupDomain);
-                _logger.LogInformation("CNAME故障转移成功完成");
+                _hasCheckedDnsConsistency = false; // 切换到CNAME后，下次IP可达时需要重新检测
+                await _telegramService.SendNotificationAsync(
+                    $"⚠️ 故障转移已触发\n\n" +
+                    $"域名: {_settings.PrimaryDomain}\n" +
+                    $"类型: CNAME\n" +
+                    $"目标: {_settings.BackupDomain}\n" +
+                    $"原因: IP连续{_settings.FailureThreshold}次不可达\n" +
+                    $"状态: 系统将继续监控新IP");
+                _logger.LogInformation("成功切换到CNAME: {BackupDomain}", _settings.BackupDomain);
             }
             else
             {
-                _logger.LogError("CNAME故障转移失败");
+                _logger.LogError("切换到CNAME失败");
                 await _telegramService.SendErrorNotificationAsync("故障转移到备用域名失败");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "执行故障转移时发生异常");
+            _logger.LogError(ex, "切换到CNAME时发生异常");
             await _telegramService.SendErrorNotificationAsync($"故障转移异常: {ex.Message}");
-        }
-    }
-
-    private async Task CheckForRecoveryAsync()
-    {
-        try
-        {
-            // 获取最新的IP地址
-            var currentIp = await _ipProviderService.GetCurrentIpAsync();
-            
-            if (string.IsNullOrEmpty(currentIp))
-            {
-                _logger.LogWarning("无法获取当前IP地址，跳过恢复检测");
-                return;
-            }
-
-            // 检查IP是否发生变化
-            if (currentIp != _lastKnownIp)
-            {
-                _logger.LogInformation("恢复检测时发现IP变化: {OldIp} → {NewIp}", _lastKnownIp, currentIp);
-                _lastKnownIp = currentIp;
-                await _telegramService.SendNotificationAsync($"📍 IP地址变化\n\n旧IP: {_lastKnownIp}\n新IP: {currentIp}\n状态: 正在测试新IP可用性");
-            }
-
-            // 测试新IP是否可用
-            var isAvailable = await _tcpPingService.PingAsync(currentIp, _settings.PrimaryPort);
-            
-            if (isAvailable)
-            {
-                _logger.LogInformation("检测到服务恢复，准备切换回A记录，IP: {IpAddress}", currentIp);
-                
-                var success = await _cloudflareService.SwitchToARecordAsync(currentIp);
-                
-                if (success)
-                {
-                    _currentState = DnsRecordState.ARecord;
-                    _consecutiveFailures = 0;
-                    await _telegramService.SendRecoveryNotificationAsync(_settings.PrimaryDomain);
-                    _logger.LogInformation("成功恢复到A记录，IP: {IpAddress}", currentIp);
-                }
-                else
-                {
-                    _logger.LogError("切换回A记录失败");
-                    await _telegramService.SendErrorNotificationAsync("切换回A记录失败");
-                }
-            }
-            else
-            {
-                _logger.LogDebug("当前IP {IpAddress} 仍不可用，继续等待", currentIp);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "检查恢复时发生异常");
         }
     }
 }

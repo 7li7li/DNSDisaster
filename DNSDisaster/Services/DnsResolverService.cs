@@ -11,10 +11,12 @@ public interface IDnsResolverService
 
 public class DnsResolverService : IDnsResolverService
 {
+    private readonly ICloudflareService _cloudflareService;
     private readonly ILogger<DnsResolverService> _logger;
 
-    public DnsResolverService(ILogger<DnsResolverService> logger)
+    public DnsResolverService(ICloudflareService cloudflareService, ILogger<DnsResolverService> logger)
     {
+        _cloudflareService = cloudflareService;
         _logger = logger;
     }
 
@@ -22,21 +24,36 @@ public class DnsResolverService : IDnsResolverService
     {
         try
         {
-            var addresses = await Dns.GetHostAddressesAsync(domain);
-            var ipv4Address = addresses.FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
-            
-            if (ipv4Address != null)
+            // 通过Cloudflare API获取当前DNS记录（即时生效，无缓存）
+            var recordType = await _cloudflareService.GetCurrentRecordTypeAsync();
+            var recordContent = await _cloudflareService.GetCurrentRecordContentAsync();
+
+            if (string.IsNullOrEmpty(recordType) || string.IsNullOrEmpty(recordContent))
             {
-                _logger.LogDebug("域名 {Domain} 解析到IP: {IpAddress}", domain, ipv4Address);
-                return ipv4Address.ToString();
+                _logger.LogWarning("无法从Cloudflare获取域名 {Domain} 的DNS记录", domain);
+                return null;
+            }
+
+            // 如果是A记录，返回IP地址
+            if (recordType.Equals("A", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug("域名 {Domain} 当前为A记录，IP: {IpAddress}", domain, recordContent);
+                return recordContent;
             }
             
-            _logger.LogWarning("域名 {Domain} 未找到IPv4地址", domain);
+            // 如果是CNAME记录，返回null（表示不是A记录）
+            if (recordType.Equals("CNAME", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug("域名 {Domain} 当前为CNAME记录，目标: {Target}", domain, recordContent);
+                return null;
+            }
+
+            _logger.LogWarning("域名 {Domain} 的记录类型为 {RecordType}，不是A记录", domain, recordType);
             return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "解析域名 {Domain} 时发生异常", domain);
+            _logger.LogError(ex, "通过Cloudflare API解析域名 {Domain} 时发生异常", domain);
             return null;
         }
     }
@@ -45,10 +62,8 @@ public class DnsResolverService : IDnsResolverService
     {
         try
         {
-            // 简单检查：如果能解析到IP地址，通常表示是A记录
-            // 更准确的方法需要使用DNS查询库，但这里用简单方法
-            var ip = await GetARecordAsync(domain);
-            return !string.IsNullOrEmpty(ip);
+            var recordType = await _cloudflareService.GetCurrentRecordTypeAsync();
+            return recordType?.Equals("A", StringComparison.OrdinalIgnoreCase) ?? false;
         }
         catch
         {

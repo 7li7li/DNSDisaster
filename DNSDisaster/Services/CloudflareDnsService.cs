@@ -10,6 +10,7 @@ public interface ICloudflareService
     Task<bool> SwitchToCnameAsync(string targetDomain);
     Task<bool> SwitchToARecordAsync(string ipAddress);
     Task<string?> GetCurrentRecordTypeAsync();
+    Task<string?> GetCurrentRecordContentAsync();
 }
 
 public class CloudflareDnsService : ICloudflareService
@@ -126,6 +127,20 @@ public class CloudflareDnsService : ICloudflareService
         catch (Exception ex)
         {
             _logger.LogError(ex, "获取当前DNS记录类型时发生异常");
+            return null;
+        }
+    }
+
+    public async Task<string?> GetCurrentRecordContentAsync()
+    {
+        try
+        {
+            var record = await GetDnsRecordAsync();
+            return record?.Content;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "获取当前DNS记录内容时发生异常");
             return null;
         }
     }
