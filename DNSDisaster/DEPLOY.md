@@ -1,46 +1,68 @@
 # DNS灾难恢复系统 - 部署指南
 
-## 快速部署步骤
+## 快速开始
 
-### 1. 准备发布文件
-
-在Windows上已经完成发布，文件位于：
-```
-D:\Project\VS\DNSDisaster\DNSDisaster\bin\Release\net8.0\publish\linux-x64\
-```
-
-### 2. 上传到Linux服务器
-
-使用SCP或其他工具上传发布文件到服务器：
+### 1. 上传文件
 
 ```bash
-# 示例：使用SCP上传
-scp -r D:\Project\VS\DNSDisaster\DNSDisaster\bin\Release\net8.0\publish\linux-x64\* user@server:/tmp/dns-disaster/
+# 上传可执行文件和配置
+scp DNSDisaster user@server:/opt/dns-disaster/
+scp appsettings.json user@server:/opt/dns-disaster/
 ```
 
-或者使用WinSCP、FileZilla等图形化工具上传。
-
-### 3. 在服务器上部署
-
-SSH连接到服务器后执行：
+### 2. 配置并运行
 
 ```bash
-# 创建部署目录
-sudo mkdir -p /opt/dns-disaster
+# 设置权限
+chmod +x /opt/dns-disaster/DNSDisaster
 
-# 移动文件
-sudo mv /tmp/dns-disaster/* /opt/dns-disaster/
+# 创建日志目录
+mkdir -p /opt/dns-disaster/logs
 
-# 设置执行权限
-sudo chmod +x /opt/dns-disaster/DNSDisaster
+# 编辑配置
+nano /opt/dns-disaster/appsettings.json
 
-# 配置appsettings.json
-sudo nano /opt/dns-disaster/appsettings.json
+# 测试运行
+cd /opt/dns-disaster
+./DNSDisaster
 ```
 
-### 4. 配置appsettings.json
+### 3. 设置为系统服务
 
-确保配置文件包含正确的信息：
+```bash
+# 创建服务文件
+sudo nano /etc/systemd/system/dns-disaster.service
+```
+
+内容：
+```ini
+[Unit]
+Description=DNS Disaster Recovery System
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/dns-disaster
+ExecStart=/opt/dns-disaster/DNSDisaster
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启动服务：
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable dns-disaster
+sudo systemctl start dns-disaster
+sudo systemctl status dns-disaster
+```
+
+## 配置说明
+
+### appsettings.json
 
 ```json
 {
@@ -57,7 +79,8 @@ sudo nano /opt/dns-disaster/appsettings.json
   },
   "Telegram": {
     "BotToken": "your_telegram_bot_token",
-    "ChatId": "your_chat_id"
+    "ChatId": "your_chat_id",
+    "ApiBaseUrl": "https://tg-api.7li7li.com"
   },
   "IpProvider": {
     "Username": "your_username",
@@ -69,57 +92,29 @@ sudo nano /opt/dns-disaster/appsettings.json
 }
 ```
 
-### 5. 创建systemd服务
+### 获取配置信息
 
-创建服务文件：
+**Cloudflare**:
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. 选择域名，复制右侧的 Zone ID
+3. 创建API令牌：My Profile > API Tokens > Create Token
+4. 权限：Zone:DNS:Edit
 
-```bash
-sudo nano /etc/systemd/system/dns-disaster.service
-```
+**Telegram**:
+1. 与 [@BotFather](https://t.me/botfather) 创建机器人，获取 Bot Token
+2. 与 [@userinfobot](https://t.me/userinfobot) 获取 Chat ID
+3. 大陆部署使用 `https://tg-api.7li7li.com`
 
-内容如下：
+**IP Provider**:
+- 配置 `DirectIpApiUrl` 优先使用（性能更好）
+- 或配置 nya.trp.sh 账号信息
 
-```ini
-[Unit]
-Description=DNS Disaster Recovery System
-After=network.target
+## 日志管理
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/dns-disaster
-ExecStart=/opt/dns-disaster/DNSDisaster
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=dns-disaster
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### 6. 启动服务
+### 查看日志
 
 ```bash
-# 重新加载systemd配置
-sudo systemctl daemon-reload
-
-# 启用开机自启
-sudo systemctl enable dns-disaster
-
-# 启动服务
-sudo systemctl start dns-disaster
-
-# 查看状态
-sudo systemctl status dns-disaster
-```
-
-### 7. 查看日志
-
-**查看文件日志**:
-```bash
-# 实时查看今天的日志
+# 实时查看
 tail -f /opt/dns-disaster/logs/dns-disaster-$(date +%Y%m%d).log
 
 # 查看最近100行
@@ -129,191 +124,108 @@ tail -n 100 /opt/dns-disaster/logs/dns-disaster-$(date +%Y%m%d).log
 grep "ERR" /opt/dns-disaster/logs/dns-disaster-*.log
 ```
 
-**查看systemd日志**:
-```bash
-# 实时查看日志
-sudo journalctl -u dns-disaster -f
+### 日志配置
+- 位置：`logs/dns-disaster-YYYYMMDD.log`
+- 滚动：每天创建新文件
+- 保留：30天
+- 大小：单文件最大10MB
 
-# 查看最近100行日志
-sudo journalctl -u dns-disaster -n 100
-
-# 查看今天的日志
-sudo journalctl -u dns-disaster --since today
-```
-
-**注意**: 系统会同时输出日志到文件和systemd journal，建议主要查看文件日志，因为它有更好的格式和保留策略。
+详细说明见 [LOGGING.md](LOGGING.md)
 
 ## 常用命令
 
 ```bash
-# 启动服务
-sudo systemctl start dns-disaster
+# 服务管理
+sudo systemctl start dns-disaster    # 启动
+sudo systemctl stop dns-disaster     # 停止
+sudo systemctl restart dns-disaster  # 重启
+sudo systemctl status dns-disaster   # 状态
 
-# 停止服务
-sudo systemctl stop dns-disaster
-
-# 重启服务
-sudo systemctl restart dns-disaster
-
-# 查看状态
-sudo systemctl status dns-disaster
-
-# 查看日志
+# 日志查看
+tail -f /opt/dns-disaster/logs/dns-disaster-$(date +%Y%m%d).log
 sudo journalctl -u dns-disaster -f
 
-# 禁用开机自启
-sudo systemctl disable dns-disaster
-```
-
-## 更新部署
-
-当需要更新程序时：
-
-```bash
-# 停止服务
+# 更新程序
 sudo systemctl stop dns-disaster
-
-# 备份当前版本（可选）
-sudo cp -r /opt/dns-disaster /opt/dns-disaster.backup
-
-# 上传新版本文件并覆盖
-sudo cp /tmp/dns-disaster-new/* /opt/dns-disaster/
-
-# 设置权限
+sudo cp /tmp/DNSDisaster /opt/dns-disaster/
 sudo chmod +x /opt/dns-disaster/DNSDisaster
-
-# 启动服务
 sudo systemctl start dns-disaster
-
-# 查看日志确认正常运行
-sudo journalctl -u dns-disaster -f
 ```
 
 ## 故障排查
 
+### ICU库缺失错误
+
+```
+Couldn't find a valid ICU package installed on the system
+```
+
+**解决**: 使用最新版本（已禁用ICU依赖），无需安装额外库
+
 ### 服务无法启动
 
-1. 检查配置文件是否正确：
 ```bash
-cat /opt/dns-disaster/appsettings.json
-```
+# 查看错误日志
+sudo journalctl -u dns-disaster -n 50
 
-2. 检查文件权限：
-```bash
-ls -la /opt/dns-disaster/
-```
-
-3. 手动运行查看错误：
-```bash
+# 手动运行测试
 cd /opt/dns-disaster
 ./DNSDisaster
 ```
 
-### 网络连接问题
+### 日志文件不存在
 
-测试API连接：
 ```bash
-# 测试Cloudflare API
-curl -H "Authorization: Bearer YOUR_TOKEN" \
-  https://api.cloudflare.com/client/v4/zones/YOUR_ZONE_ID
-
-# 测试Telegram API
-curl https://api.telegram.org/botYOUR_BOT_TOKEN/getMe
-
-# 测试IP提供商API
-curl https://your-api.com/status
+# 创建日志目录
+mkdir -p /opt/dns-disaster/logs
+chmod 755 /opt/dns-disaster/logs
 ```
 
-### 查看详细日志
+### Telegram通知失败
 
-修改配置文件中的日志级别为Debug：
-```json
-"Logging": {
-  "LogLevel": {
-    "Default": "Information",
-    "DNSDisaster": "Debug"
-  }
-}
-```
-
-然后重启服务：
 ```bash
-sudo systemctl restart dns-disaster
+# 测试API连接
+curl https://tg-api.7li7li.com/botYOUR_BOT_TOKEN/getMe
+
+# 检查日志
+grep "Telegram" /opt/dns-disaster/logs/dns-disaster-*.log
 ```
 
-## 安全建议
+### DNS更新失败
 
-1. **保护配置文件**：
 ```bash
-sudo chmod 600 /opt/dns-disaster/appsettings.json
+# 检查Cloudflare配置
+curl -X GET "https://api.cloudflare.com/client/v4/zones/YOUR_ZONE_ID" \
+  -H "Authorization: Bearer YOUR_API_TOKEN"
+
+# 查看错误日志
+grep "Cloudflare" /opt/dns-disaster/logs/dns-disaster-*.log
 ```
 
-2. **使用专用用户**（可选）：
-```bash
-# 创建专用用户
-sudo useradd -r -s /bin/false dns-disaster
+## 验证部署
 
-# 修改文件所有者
-sudo chown -R dns-disaster:dns-disaster /opt/dns-disaster
-
-# 修改服务文件中的User
-sudo nano /etc/systemd/system/dns-disaster.service
-# 将 User=root 改为 User=dns-disaster
-```
-
-3. **定期备份配置**：
-```bash
-sudo cp /opt/dns-disaster/appsettings.json ~/appsettings.json.backup
-```
-
-## 监控建议
-
-1. **设置监控告警**：通过Telegram通知已经实现基本监控
-
-2. **定期检查日志**：
-```bash
-# 添加到crontab每天检查
-0 9 * * * journalctl -u dns-disaster --since "24 hours ago" | grep -i error
-```
-
-3. **监控服务状态**：
-```bash
-# 创建监控脚本
-cat > /usr/local/bin/check-dns-disaster.sh << 'EOF'
-#!/bin/bash
-if ! systemctl is-active --quiet dns-disaster; then
-    echo "DNS Disaster service is not running!"
-    systemctl start dns-disaster
-fi
-EOF
-
-chmod +x /usr/local/bin/check-dns-disaster.sh
-
-# 添加到crontab每5分钟检查一次
-*/5 * * * * /usr/local/bin/check-dns-disaster.sh
-```
-
-## 性能优化
-
-1. **调整检测间隔**：根据实际需求调整 `CheckIntervalSeconds`
-2. **使用直接IP查询API**：配置 `DirectIpApiUrl` 以获得更好的性能
-3. **合理设置失败阈值**：`FailureThreshold` 建议设置为3-5次
+部署成功后应该：
+- ✅ 服务状态为 `active (running)`
+- ✅ 收到Telegram启动通知
+- ✅ 日志文件正常生成
+- ✅ 系统开始监控DNS
 
 ## 卸载
-
-如果需要完全卸载：
 
 ```bash
 # 停止并禁用服务
 sudo systemctl stop dns-disaster
 sudo systemctl disable dns-disaster
 
-# 删除服务文件
+# 删除文件
 sudo rm /etc/systemd/system/dns-disaster.service
-
-# 删除程序文件
 sudo rm -rf /opt/dns-disaster
 
 # 重新加载systemd
 sudo systemctl daemon-reload
 ```
+
+## 更多文档
+
+- [README.md](../README.md) - 功能说明和配置详解
+- [LOGGING.md](LOGGING.md) - 日志管理详细指南
