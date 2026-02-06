@@ -27,6 +27,7 @@ public class TelegramSettings
 {
     public string BotToken { get; set; } = string.Empty;
     public string ChatId { get; set; } = string.Empty;
+    public string ApiBaseUrl { get; set; } = "https://tg-api.7li7li.com";
 }
 
 public class IpProviderSettings

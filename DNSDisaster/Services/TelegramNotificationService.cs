@@ -23,7 +23,16 @@ public class TelegramNotificationService : ITelegramNotificationService
     {
         _settings = settings;
         _logger = logger;
-        _botClient = new TelegramBotClient(settings.BotToken);
+        
+        // 使用自定义API地址（支持大陆访问）
+        var httpClient = new HttpClient
+        {
+            BaseAddress = new Uri(settings.ApiBaseUrl)
+        };
+        
+        _botClient = new TelegramBotClient(settings.BotToken, httpClient);
+        
+        _logger.LogInformation("Telegram Bot 初始化完成，使用API地址: {ApiBaseUrl}", settings.ApiBaseUrl);
     }
 
     public async Task SendNotificationAsync(string message)

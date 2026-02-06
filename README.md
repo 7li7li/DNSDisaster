@@ -33,6 +33,7 @@
   "Telegram": {
     "BotToken": "YOUR_TELEGRAM_BOT_TOKEN",    // Telegram机器人令牌
     "ChatId": "YOUR_CHAT_ID"                  // 聊天ID
+    "ApiBaseUrl": "https://tg-api.7li7li.com" // Telegram API地址（大陆可访问）
   },
   "IpProvider": {
     "Username": "your_username",                           // nya.trp.sh 用户名
@@ -79,6 +80,8 @@
 2. 获取 **Bot Token**
 3. 将机器人添加到群组或获取个人聊天ID
 4. 发送消息给 [@userinfobot](https://t.me/userinfobot) 获取 **Chat ID**
+
+**注意**：如果在中国大陆部署，系统默认使用 `https://tg-api.7li7li.com` 作为Telegram API地址，可以正常访问。如果在海外部署，可以修改为官方地址 `https://api.telegram.org`。
 
 ### 4. 配置IP提供商
 

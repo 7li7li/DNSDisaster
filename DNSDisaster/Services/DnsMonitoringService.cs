@@ -91,7 +91,7 @@ public class DnsMonitoringService
                 if (isIpReachable)
                 {
                     // 步骤3: IP可达，只在第一次检查主域名是否指向该IP
-                    _logger.LogDebug("✅ IP {IpAddress} 可达", currentIp);
+                    _logger.LogDebug("IP {IpAddress} 可达", currentIp);
                     
                     // 重置失败计数
                     if (_consecutiveFailures > 0)
