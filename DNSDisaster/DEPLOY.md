@@ -66,13 +66,23 @@ sudo systemctl status dns-disaster
 
 ```json
 {
-  "DNSDisaster": {
-    "PrimaryDomain": "your-domain.com",
-    "PrimaryPort": 12345,
-    "BackupDomain": "backup-domain.com",
-    "CheckIntervalSeconds": 30,
-    "FailureThreshold": 3
-  },
+  "MonitorTasks": [
+    {
+      "Name": "Task1",
+      "PrimaryDomain": "your-domain.com",
+      "PrimaryPort": 12345,
+      "BackupDomain": "backup-domain.com",
+      "CheckIntervalSeconds": 30,
+      "FailureThreshold": 3,
+      "IpProvider": {
+        "Username": "your_username",
+        "Password": "your_password",
+        "DeviceGroupId": 1,
+        "ApiBaseUrl": "https://nya.trp.sh/api/v1",
+        "DirectIpApiUrl": "https://your-api.com/status"
+      }
+    }
+  ],
   "Cloudflare": {
     "ApiToken": "your_cloudflare_api_token",
     "ZoneId": "your_zone_id"
@@ -80,17 +90,12 @@ sudo systemctl status dns-disaster
   "Telegram": {
     "BotToken": "your_telegram_bot_token",
     "ChatId": "your_chat_id",
-    "ApiBaseUrl": "https://tg-api.xxx.com"
-  },
-  "IpProvider": {
-    "Username": "your_username",
-    "Password": "your_password",
-    "DeviceGroupId": 1,
-    "ApiBaseUrl": "https://nya.trp.sh/api/v1",
-    "DirectIpApiUrl": "https://your-api.com/status"
+    "ApiBaseUrl": "https://tg-api.7li7li.com"
   }
 }
 ```
+
+**支持多任务**: 可以在 `MonitorTasks` 数组中配置多个监控任务，每个任务独立运行。
 
 ### 获取配置信息
 

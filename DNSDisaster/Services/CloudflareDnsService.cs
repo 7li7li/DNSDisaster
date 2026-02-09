@@ -20,11 +20,11 @@ public class CloudflareDnsService : ICloudflareService
     private readonly string _recordName;
     private readonly ILogger<CloudflareDnsService> _logger;
 
-    public CloudflareDnsService(HttpClient httpClient, CloudflareSettings settings, DNSDisasterSettings dnsSettings, ILogger<CloudflareDnsService> logger)
+    public CloudflareDnsService(HttpClient httpClient, CloudflareSettings settings, MonitorTask task, ILogger<CloudflareDnsService> logger)
     {
         _httpClient = httpClient;
         _settings = settings;
-        _recordName = dnsSettings.PrimaryDomain;
+        _recordName = task.PrimaryDomain;
         _logger = logger;
         
         _httpClient.BaseAddress = new Uri("https://api.cloudflare.com/client/v4/");

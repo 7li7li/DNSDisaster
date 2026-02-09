@@ -25,13 +25,23 @@
 
 ```json
 {
-  "DNSDisaster": {
-    "PrimaryDomain": "your-domain.com",
-    "PrimaryPort": 12345,
-    "BackupDomain": "backup-domain.com",
-    "CheckIntervalSeconds": 30,
-    "FailureThreshold": 3
-  },
+  "MonitorTasks": [
+    {
+      "Name": "Task1",
+      "PrimaryDomain": "your-domain.com",
+      "PrimaryPort": 12345,
+      "BackupDomain": "backup-domain.com",
+      "CheckIntervalSeconds": 30,
+      "FailureThreshold": 3,
+      "IpProvider": {
+        "Username": "your_username",
+        "Password": "your_password",
+        "DeviceGroupId": 1,
+        "ApiBaseUrl": "https://nya.trp.sh/api/v1",
+        "DirectIpApiUrl": "https://your-api.com/status"
+      }
+    }
+  ],
   "Cloudflare": {
     "ApiToken": "your_cloudflare_api_token",
     "ZoneId": "your_zone_id"
@@ -39,17 +49,12 @@
   "Telegram": {
     "BotToken": "your_telegram_bot_token",
     "ChatId": "your_chat_id",
-    "ApiBaseUrl": "https://tg-api.7li7li.com"
-  },
-  "IpProvider": {
-    "Username": "your_username",
-    "Password": "your_password",
-    "DeviceGroupId": 1,
-    "ApiBaseUrl": "https://nya.trp.sh/api/v1",
-    "DirectIpApiUrl": "https://your-api.com/status"
+    "ApiBaseUrl": "https://tg-api.xxx.com"
   }
 }
 ```
+
+**支持多任务**: 可以在 `MonitorTasks` 数组中配置多个监控任务，每个任务独立运行，拥有自己的域名和IP提供商配置。
 
 ### 3. 运行
 
@@ -75,15 +80,71 @@ chmod +x DNSDisaster
 
 ## 配置说明
 
-### DNSDisaster 配置
+### 多任务配置
+
+系统支持同时监控多个域名，每个任务独立运行：
+
+```json
+{
+  "MonitorTasks": [
+    {
+      "Name": "Task1",
+      "PrimaryDomain": "domain1.com",
+      "PrimaryPort": 12345,
+      "BackupDomain": "backup1.com",
+      "CheckIntervalSeconds": 30,
+      "FailureThreshold": 3,
+      "IpProvider": {
+        "Username": "user1",
+        "Password": "pass1",
+        "DeviceGroupId": 1,
+        "ApiBaseUrl": "https://nya.trp.sh/api/v1",
+        "DirectIpApiUrl": ""
+      }
+    },
+    {
+      "Name": "Task2",
+      "PrimaryDomain": "domain2.com",
+      "PrimaryPort": 23456,
+      "BackupDomain": "backup2.com",
+      "CheckIntervalSeconds": 30,
+      "FailureThreshold": 3,
+      "IpProvider": {
+        "Username": "user2",
+        "Password": "pass2",
+        "DeviceGroupId": 2,
+        "ApiBaseUrl": "https://nya.trp.sh/api/v1",
+        "DirectIpApiUrl": "https://api2.com/status"
+      }
+    }
+  ],
+  "Cloudflare": {
+    "ApiToken": "shared_token",
+    "ZoneId": "shared_zone_id"
+  },
+  "Telegram": {
+    "BotToken": "shared_bot_token",
+    "ChatId": "shared_chat_id",
+    "ApiBaseUrl": "https://tg-api.xxx.com"
+  }
+}
+```
+
+### 任务配置 (MonitorTask)
 
 | 配置项 | 说明 | 示例 |
 |--------|------|------|
+| Name | 任务名称（用于日志标识） | Task1 |
 | PrimaryDomain | 要监控的主域名 | example.com |
 | PrimaryPort | TCPing检测的目标端口 | 12345 |
 | BackupDomain | 故障时切换的备用域名 | backup.example.com |
 | CheckIntervalSeconds | 检测间隔（秒） | 30 |
 | FailureThreshold | 触发故障转移的失败次数 | 3 |
+| IpProvider | IP提供商配置（每个任务独立） | 见下文 |
+
+### 全局配置
+
+**Cloudflare** 和 **Telegram** 配置在所有任务间共享。
 
 ### Cloudflare 配置
 
@@ -98,27 +159,38 @@ chmod +x DNSDisaster
 获取方式：
 1. 与 [@BotFather](https://t.me/botfather) 创建机器人
 2. 与 [@userinfobot](https://t.me/userinfobot) 获取 Chat ID
-3. 大陆部署使用 `https://tg-api.7li7li.com`
+3. 大陆部署使用 `https://tg-api.xxx.com`
 
 ### IP Provider 配置
 
-支持两种方式：
+每个任务可以有自己的IP提供商配置，支持两种方式：
 
 **方式1: 直接IP查询API（推荐）**
 ```json
-"DirectIpApiUrl": "https://your-api.com/status"
+"IpProvider": {
+  "DirectIpApiUrl": "https://your-api.com/status",
+  "Username": "",
+  "Password": "",
+  "DeviceGroupId": 1,
+  "ApiBaseUrl": "https://nya.trp.sh/api/v1"
+}
 ```
 API响应格式：`{"current_ip": "1.2.3.4"}`
 
 **方式2: nya.trp.sh 设备组API**
 ```json
-"Username": "your_username",
-"Password": "your_password",
-"DeviceGroupId": 1,
-"ApiBaseUrl": "https://nya.trp.sh/api/v1"
+"IpProvider": {
+  "Username": "your_username",
+  "Password": "your_password",
+  "DeviceGroupId": 1,
+  "ApiBaseUrl": "https://nya.trp.sh/api/v1",
+  "DirectIpApiUrl": ""
+}
 ```
 
 系统会优先使用直接IP查询API，失败时自动回退到设备组API。
+
+**注意**: 不同任务可以使用不同的IP提供商配置，实现灵活的多源监控。
 
 ## 日志管理
 
@@ -235,7 +307,7 @@ sudo journalctl -u dns-disaster -n 50
 **Telegram通知不工作**
 ```bash
 # 测试API连接
-curl https://tg-api.7li7li.com/botYOUR_BOT_TOKEN/getMe
+curl https://tg-api.xxx.com/botYOUR_BOT_TOKEN/getMe
 ```
 
 **DNS更新失败**
