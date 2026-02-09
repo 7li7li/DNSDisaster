@@ -37,8 +37,8 @@
         "Username": "your_username",
         "Password": "your_password",
         "DeviceGroupId": 1,
-        "ApiBaseUrl": "https://nya.trp.sh/api/v1",
-        "DirectIpApiUrl": "https://your-api.com/status"
+        "ApiBaseUrl": "https://api.example.com/v1",
+        "DirectIpApiUrl": "https://ip-api.example.com/status"
       }
     }
   ],
@@ -98,7 +98,7 @@ chmod +x DNSDisaster
         "Username": "user1",
         "Password": "pass1",
         "DeviceGroupId": 1,
-        "ApiBaseUrl": "https://nya.trp.sh/api/v1",
+        "ApiBaseUrl": "https://api.example.com/v1",
         "DirectIpApiUrl": ""
       }
     },
@@ -113,8 +113,8 @@ chmod +x DNSDisaster
         "Username": "user2",
         "Password": "pass2",
         "DeviceGroupId": 2,
-        "ApiBaseUrl": "https://nya.trp.sh/api/v1",
-        "DirectIpApiUrl": "https://api2.com/status"
+        "ApiBaseUrl": "https://api.example.com/v1",
+        "DirectIpApiUrl": "https://ip-api2.example.com/status"
       }
     }
   ],
@@ -168,22 +168,22 @@ chmod +x DNSDisaster
 **方式1: 直接IP查询API（推荐）**
 ```json
 "IpProvider": {
-  "DirectIpApiUrl": "https://your-api.com/status",
+  "DirectIpApiUrl": "https://ip-api.example.com/status",
   "Username": "",
   "Password": "",
   "DeviceGroupId": 1,
-  "ApiBaseUrl": "https://nya.trp.sh/api/v1"
+  "ApiBaseUrl": "https://api.example.com/v1"
 }
 ```
 API响应格式：`{"current_ip": "1.2.3.4"}`
 
-**方式2: nya.trp.sh 设备组API**
+**方式2: 设备组API**
 ```json
 "IpProvider": {
   "Username": "your_username",
   "Password": "your_password",
   "DeviceGroupId": 1,
-  "ApiBaseUrl": "https://nya.trp.sh/api/v1",
+  "ApiBaseUrl": "https://api.example.com/v1",
   "DirectIpApiUrl": ""
 }
 ```

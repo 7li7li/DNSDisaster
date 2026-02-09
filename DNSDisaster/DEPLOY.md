@@ -78,8 +78,8 @@ sudo systemctl status dns-disaster
         "Username": "your_username",
         "Password": "your_password",
         "DeviceGroupId": 1,
-        "ApiBaseUrl": "https://nya.trp.sh/api/v1",
-        "DirectIpApiUrl": "https://your-api.com/status"
+        "ApiBaseUrl": "https://api.example.com/v1",
+        "DirectIpApiUrl": "https://ip-api.example.com/status"
       }
     }
   ],
@@ -90,12 +90,65 @@ sudo systemctl status dns-disaster
   "Telegram": {
     "BotToken": "your_telegram_bot_token",
     "ChatId": "your_chat_id",
-    "ApiBaseUrl": "https://tg-api.7li7li.com"
+    "ApiBaseUrl": "https://tg-api.xxx.com"
   }
 }
 ```
 
 **支持多任务**: 可以在 `MonitorTasks` 数组中配置多个监控任务，每个任务独立运行。
+
+### 多任务配置示例
+
+```json
+{
+  "MonitorTasks": [
+    {
+      "Name": "Task1",
+      "PrimaryDomain": "domain1.example.com",
+      "PrimaryPort": 12345,
+      "BackupDomain": "backup1.example.com",
+      "CheckIntervalSeconds": 30,
+      "FailureThreshold": 3,
+      "IpProvider": {
+        "Username": "user1",
+        "Password": "pass1",
+        "DeviceGroupId": 1,
+        "ApiBaseUrl": "https://api.example.com/v1",
+        "DirectIpApiUrl": ""
+      }
+    },
+    {
+      "Name": "Task2",
+      "PrimaryDomain": "domain2.example.com",
+      "PrimaryPort": 23456,
+      "BackupDomain": "backup2.example.com",
+      "CheckIntervalSeconds": 30,
+      "FailureThreshold": 3,
+      "IpProvider": {
+        "Username": "user2",
+        "Password": "pass2",
+        "DeviceGroupId": 2,
+        "ApiBaseUrl": "https://api.example.com/v1",
+        "DirectIpApiUrl": "https://ip-api2.example.com/status"
+      }
+    }
+  ],
+  "Cloudflare": {
+    "ApiToken": "shared_cloudflare_token",
+    "ZoneId": "shared_zone_id"
+  },
+  "Telegram": {
+    "BotToken": "shared_bot_token",
+    "ChatId": "shared_chat_id",
+    "ApiBaseUrl": "https://tg-api.xxx.com"
+  }
+}
+```
+
+**注意**: 
+- 每个任务可以有独立的域名、端口和IP提供商配置
+- Cloudflare和Telegram配置在所有任务间共享
+- 所有任务并行运行，互不影响
 
 ### 获取配置信息
 
@@ -112,7 +165,7 @@ sudo systemctl status dns-disaster
 
 **IP Provider**:
 - 配置 `DirectIpApiUrl` 优先使用（性能更好）
-- 或配置 nya.trp.sh 账号信息
+- 或配置设备组API账号信息
 
 ## 日志管理
 
