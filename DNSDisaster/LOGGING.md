@@ -116,7 +116,7 @@ less logs/dns-disaster-$(date +%Y%m%d).log
 ### 系统启动
 ```
 [2026-02-06 15:30:45 INF] DNS灾难恢复系统启动中...
-[2026-02-06 15:30:45 INF] Telegram Bot 初始化完成，使用API地址: https://tg-api.7li7li.com
+[2026-02-06 15:30:45 INF] Telegram Bot 初始化完成，使用API地址: https://tg-api.xxx.com
 [2026-02-06 15:30:46 INF] 开始DNS监控服务...
 ```
 
