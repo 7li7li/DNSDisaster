@@ -65,92 +65,7 @@ public class DnsMonitoringService
         {
             try
             {
-                // 步骤1: 通过API获取当前IP
-                var currentIp = await _ipProviderService.GetCurrentIpAsync();
-                
-                if (string.IsNullOrEmpty(currentIp))
-                {
-                    _logger.LogWarning("[{TaskName}] 无法获取当前IP地址，等待下次检测", _task.Name);
-                    await Task.Delay(TimeSpan.FromSeconds(_task.CheckIntervalSeconds), cancellationToken);
-                    continue;
-                }
-
-                // 检测IP是否变化
-                if (currentIp != _currentMonitoredIp)
-                {
-                    _logger.LogInformation("[{TaskName}] 检测到IP变化: {OldIp} → {NewIp}", _task.Name, _currentMonitoredIp ?? "无", currentIp);
-                    _currentMonitoredIp = currentIp;
-                    _consecutiveFailures = 0; // 重置失败计数
-                    _hasCheckedDnsConsistency = false; // IP变化后需要重新检测DNS一致性
-                }
-
-                // 步骤2: TCPing检测该IP是否联通
-                _logger.LogDebug("[{TaskName}] 检测IP连通性: {IpAddress}:{Port}", _task.Name, currentIp, _task.PrimaryPort);
-                var isIpReachable = await _tcpPingService.PingAsync(currentIp, _task.PrimaryPort);
-
-                if (isIpReachable)
-                {
-                    // 步骤3: IP可达，只在第一次检查主域名是否指向该IP
-                    _logger.LogDebug("IP {IpAddress} 可达", currentIp);
-                    
-                    // 重置失败计数
-                    if (_consecutiveFailures > 0)
-                    {
-                        _logger.LogInformation("连接恢复，重置失败计数");
-                        _consecutiveFailures = 0;
-                    }
-
-                    // 只在第一次或IP变化后检测DNS一致性
-                    if (!_hasCheckedDnsConsistency)
-                    {
-                        _logger.LogInformation("[{Timestamp}] 首次检测DNS一致性: IP={IpAddress}", 
-                            DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), currentIp);
-                        
-                        // 解析主域名当前的IP
-                        var domainIp = await _dnsResolverService.GetARecordAsync(_task.PrimaryDomain);
-                        
-                        if (string.IsNullOrEmpty(domainIp))
-                        {
-                            _logger.LogDebug("[{Timestamp}] 主域名 {Domain} 无法解析为IP（可能是CNAME），准备切换到A记录", 
-                                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), _task.PrimaryDomain);
-                            
-                            // 尝试切换到A记录
-                            await SwitchToARecordAsync(currentIp, "主域名无法解析为IP");
-                        }
-                        else if (domainIp != currentIp)
-                        {
-                            _logger.LogDebug("[{Timestamp}] 主域名IP不一致: 域名={DomainIp}, 当前={CurrentIp}", 
-                                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), domainIp, currentIp);
-                            
-                            // IP不一致，更新A记录
-                            await SwitchToARecordAsync(currentIp, $"IP不一致 ({domainIp} → {currentIp})");
-                        }
-                        else
-                        {
-                            _logger.LogDebug("[{Timestamp}] 主域名IP一致: {IpAddress}，无需更新", 
-                                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), currentIp);
-                            _currentState = DnsRecordState.ARecord;
-                        }
-                        
-                        // 标记已检测过
-                        _hasCheckedDnsConsistency = true;
-                    }
-                }
-                else
-                {
-                    // IP不可达，增加失败计数
-                    _consecutiveFailures++;
-                    _logger.LogWarning("[{TaskName}] ❌ IP {IpAddress} 不可达 (失败 {FailureCount}/{Threshold})", 
-                        _task.Name, currentIp, _consecutiveFailures, _task.FailureThreshold);
-
-                    // 达到失败阈值，切换到CNAME
-                    if (_consecutiveFailures >= _task.FailureThreshold)
-                    {
-                        await SwitchToCnameAsync();
-                        _consecutiveFailures = 0; // 重置计数，继续监控新IP
-                    }
-                }
-
+                await PerformDnsMonitoringAsync(cancellationToken);
                 await Task.Delay(TimeSpan.FromSeconds(_task.CheckIntervalSeconds), cancellationToken);
             }
             catch (OperationCanceledException)
@@ -162,6 +77,94 @@ public class DnsMonitoringService
                 _logger.LogError(ex, "[{TaskName}] 监控循环中发生异常", _task.Name);
                 await _telegramService.SendErrorNotificationAsync($"[{_task.Name}] 监控循环异常: {ex.Message}");
                 await Task.Delay(TimeSpan.FromSeconds(_task.CheckIntervalSeconds), cancellationToken);
+            }
+        }
+    }
+
+    private async Task PerformDnsMonitoringAsync(CancellationToken cancellationToken)
+    {
+        // 步骤1: 通过API获取当前IP
+        var currentIp = await _ipProviderService.GetCurrentIpAsync();
+        
+        if (string.IsNullOrEmpty(currentIp))
+        {
+            _logger.LogWarning("[{TaskName}] 无法获取当前IP地址，等待下次检测", _task.Name);
+            return;
+        }
+
+        // 检测IP是否变化
+        if (currentIp != _currentMonitoredIp)
+        {
+            _logger.LogInformation("[{TaskName}] 检测到IP变化: {OldIp} → {NewIp}", _task.Name, _currentMonitoredIp ?? "无", currentIp);
+            _currentMonitoredIp = currentIp;
+            _consecutiveFailures = 0; // 重置失败计数
+            _hasCheckedDnsConsistency = false; // IP变化后需要重新检测DNS一致性
+        }
+
+        // 步骤2: TCPing检测该IP是否联通
+        _logger.LogDebug("[{TaskName}] 检测IP连通性: {IpAddress}:{Port}", _task.Name, currentIp, _task.PrimaryPort);
+        var isIpReachable = await _tcpPingService.PingAsync(currentIp, _task.PrimaryPort);
+
+        if (isIpReachable)
+        {
+            // 步骤3: IP可达，只在第一次检查主域名是否指向该IP
+            _logger.LogDebug("IP {IpAddress} 可达", currentIp);
+            
+            // 重置失败计数
+            if (_consecutiveFailures > 0)
+            {
+                _logger.LogInformation("连接恢复，重置失败计数");
+                _consecutiveFailures = 0;
+            }
+
+            // 只在第一次或IP变化后检测DNS一致性
+            if (!_hasCheckedDnsConsistency)
+            {
+                _logger.LogInformation("[{Timestamp}] 首次检测DNS一致性: IP={IpAddress}", 
+                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), currentIp);
+                
+                // 解析主域名当前的IP
+                var domainIp = await _dnsResolverService.GetARecordAsync(_task.PrimaryDomain);
+                
+                if (string.IsNullOrEmpty(domainIp))
+                {
+                    _logger.LogDebug("[{Timestamp}] 主域名 {Domain} 无法解析为IP（可能是CNAME），准备切换到A记录", 
+                        DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), _task.PrimaryDomain);
+                    
+                    // 尝试切换到A记录
+                    await SwitchToARecordAsync(currentIp, "主域名无法解析为IP");
+                }
+                else if (domainIp != currentIp)
+                {
+                    _logger.LogDebug("[{Timestamp}] 主域名IP不一致: 域名={DomainIp}, 当前={CurrentIp}", 
+                        DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), domainIp, currentIp);
+                    
+                    // IP不一致，更新A记录
+                    await SwitchToARecordAsync(currentIp, $"IP不一致 ({domainIp} → {currentIp})");
+                }
+                else
+                {
+                    _logger.LogDebug("[{Timestamp}] 主域名IP一致: {IpAddress}，无需更新", 
+                        DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), currentIp);
+                    _currentState = DnsRecordState.ARecord;
+                }
+                
+                // 标记已检测过
+                _hasCheckedDnsConsistency = true;
+            }
+        }
+        else
+        {
+            // IP不可达，增加失败计数
+            _consecutiveFailures++;
+            _logger.LogWarning("[{TaskName}] ❌ IP {IpAddress} 不可达 (失败 {FailureCount}/{Threshold})", 
+                _task.Name, currentIp, _consecutiveFailures, _task.FailureThreshold);
+
+            // 达到失败阈值，切换到CNAME
+            if (_consecutiveFailures >= _task.FailureThreshold)
+            {
+                await SwitchToCnameAsync();
+                _consecutiveFailures = 0; // 重置计数，继续监控新IP
             }
         }
     }

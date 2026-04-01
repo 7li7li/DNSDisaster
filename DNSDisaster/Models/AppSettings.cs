@@ -3,6 +3,7 @@ namespace DNSDisaster.Models;
 public class AppSettings
 {
     public List<MonitorTask> MonitorTasks { get; set; } = new();
+    public List<SubscriptionMonitorTask> SubscriptionMonitorTasks { get; set; } = new();
     public CloudflareSettings Cloudflare { get; set; } = new();
     public TelegramSettings Telegram { get; set; } = new();
 }
@@ -16,6 +17,13 @@ public class MonitorTask
     public int CheckIntervalSeconds { get; set; } = 30;
     public int FailureThreshold { get; set; } = 3;
     public IpProviderSettings IpProvider { get; set; } = new();
+}
+
+public class SubscriptionMonitorTask
+{
+    public string Name { get; set; } = string.Empty;
+    public int CheckIntervalHours { get; set; } = 6;
+    public SubscriptionApiSettings ApiSettings { get; set; } = new();
 }
 
 public class CloudflareSettings
@@ -38,4 +46,11 @@ public class IpProviderSettings
     public int DeviceGroupId { get; set; } = 1;
     public string ApiBaseUrl { get; set; } = "https://api.example.com/v1";
     public string? DirectIpApiUrl { get; set; } = null;
+}
+
+public class SubscriptionApiSettings
+{
+    public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    public string ApiBaseUrl { get; set; } = "https://api.example.com/v1";
 }

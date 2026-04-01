@@ -9,7 +9,8 @@
 - **自动DNS更新** - IP可达时自动检查并更新A记录
 - **故障转移** - IP不可达时自动切换到CNAME备用域名
 - **持续恢复检测** - 即使在CNAME状态也持续监控新IP
-- **Telegram通知** - 实时通知DNS变更和系统状态
+- **套餐监控** - 自动监控套餐到期、流量使用和余额状态
+- **Telegram通知** - 实时通知DNS变更、套餐警告和系统状态
 - **文件日志** - 自动记录日志到文件，支持日志滚动
 - **Cloudflare集成** - 通过API自动管理DNS记录
 
@@ -38,7 +39,9 @@
         "Password": "your_password",
         "DeviceGroupId": 1,
         "ApiBaseUrl": "https://api.example.com/v1",
-        "DirectIpApiUrl": "https://ip-api.example.com/status"
+        "DirectIpApiUrl": "https://ip-api.example.com/status",
+        "EnableSubscriptionMonitoring": true,
+        "SubscriptionCheckIntervalHours": 6
       }
     }
   ],
@@ -140,7 +143,24 @@ chmod +x DNSDisaster
 | BackupDomain | 故障时切换的备用域名 | backup.example.com |
 | CheckIntervalSeconds | 检测间隔（秒） | 30 |
 | FailureThreshold | 触发故障转移的失败次数 | 3 |
+| EnableDnsMonitoring | 是否启用DNS容灾监控 | true |
 | IpProvider | IP提供商配置（每个任务独立） | 见下文 |
+
+#### IP Provider 套餐监控配置（可选）
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| EnableSubscriptionMonitoring | 是否启用套餐监控 | false |
+| SubscriptionCheckIntervalHours | 套餐检查间隔（小时） | 6 |
+
+套餐监控功能会定期检查：
+- 套餐到期时间（7天内到期会发送警告）
+- 流量使用情况（超过90%会发送警告）
+- 钱包余额（不足以续费会发送警告）
+
+通知消息会包含用户名和套餐名称信息。
+
+详细说明见 [SUBSCRIPTION_MONITORING.md](DNSDisaster/SUBSCRIPTION_MONITORING.md)
 
 ### 全局配置
 
@@ -223,6 +243,7 @@ tail -n 100 logs/dns-disaster-$(date +%Y%m%d).log
 - 🚀 系统启动通知
 - ✅ DNS记录更新通知（A记录变更）
 - ⚠️ 故障转移通知（切换到CNAME）
+- ⚠️ 套餐状态警告（到期、流量、余额）
 - 📍 IP地址变化通知
 - ❌ 错误和异常通知
 
@@ -323,6 +344,7 @@ curl -X GET "https://api.cloudflare.com/client/v4/zones/YOUR_ZONE_ID" \
 
 - [DEPLOY.md](DNSDisaster/DEPLOY.md) - 部署指南
 - [LOGGING.md](DNSDisaster/LOGGING.md) - 日志管理
+- [SUBSCRIPTION_MONITORING.md](DNSDisaster/SUBSCRIPTION_MONITORING.md) - 套餐监控功能
 - [appsettings.example.json](DNSDisaster/appsettings.example.json) - 配置示例
 
 ## 许可证

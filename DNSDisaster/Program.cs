@@ -55,18 +55,20 @@ class Program
                 return;
             }
 
-            Log.Information("发现 {Count} 个监控任务", appSettings.MonitorTasks.Count);
+            Log.Information("发现 {DnsCount} 个DNS监控任务，{SubCount} 个套餐监控任务", 
+                appSettings.MonitorTasks.Count, 
+                appSettings.SubscriptionMonitorTasks.Count);
 
-            // 为每个任务创建监控服务
+            // 为每个DNS监控任务创建监控服务
             var tasks = new List<Task>();
             
             foreach (var task in appSettings.MonitorTasks)
             {
-                Log.Information("初始化任务: {TaskName} - {Domain}", task.Name, task.PrimaryDomain);
+                Log.Information("初始化DNS监控任务: {TaskName} - {Domain}", task.Name, task.PrimaryDomain);
                 
                 // 为每个任务创建独立的服务提供者
                 var services = new ServiceCollection();
-                ConfigureServices(services, appSettings, task);
+                ConfigureDnsMonitoringServices(services, appSettings, task);
                 var serviceProvider = services.BuildServiceProvider();
                 
                 var monitoringService = serviceProvider.GetRequiredService<DnsMonitoringService>();
@@ -74,6 +76,22 @@ class Program
                 
                 // 启动监控任务
                 tasks.Add(Task.Run(async () => await monitoringService.StartMonitoringAsync()));
+            }
+
+            // 为每个套餐监控任务创建监控服务
+            foreach (var task in appSettings.SubscriptionMonitorTasks)
+            {
+                Log.Information("初始化套餐监控任务: {TaskName}", task.Name);
+                
+                // 为每个任务创建独立的服务提供者
+                var services = new ServiceCollection();
+                ConfigureSubscriptionMonitoringServices(services, appSettings, task);
+                var serviceProvider = services.BuildServiceProvider();
+                
+                var subscriptionService = serviceProvider.GetRequiredService<ISubscriptionMonitorService>();
+                
+                // 启动套餐监控任务
+                tasks.Add(Task.Run(async () => await subscriptionService.StartMonitoringAsync(task)));
             }
             
             // 处理Ctrl+C优雅退出
@@ -105,7 +123,7 @@ class Program
         Console.ReadKey();
     }
 
-    private static void ConfigureServices(IServiceCollection services, AppSettings appSettings, MonitorTask task)
+    private static void ConfigureDnsMonitoringServices(IServiceCollection services, AppSettings appSettings, MonitorTask task)
     {
         // 添加Serilog日志
         services.AddLogging(builder =>
@@ -144,20 +162,41 @@ class Program
         services.AddSingleton<DnsMonitoringService>();
     }
 
+    private static void ConfigureSubscriptionMonitoringServices(IServiceCollection services, AppSettings appSettings, SubscriptionMonitorTask task)
+    {
+        // 添加Serilog日志
+        services.AddLogging(builder =>
+        {
+            builder.ClearProviders();
+            builder.AddSerilog(dispose: false);
+        });
+
+        // 添加HttpClient
+        services.AddHttpClient();
+
+        // 注册全局配置
+        services.AddSingleton(appSettings.Telegram);
+        
+        // 注册服务
+        services.AddSingleton<ITelegramNotificationService, TelegramNotificationService>();
+        services.AddSingleton<ISubscriptionMonitorService, SubscriptionMonitorService>();
+    }
+
     private static bool ValidateConfiguration(AppSettings settings)
     {
         var errors = new List<string>();
 
+        // 验证DNS监控任务
         if (settings.MonitorTasks == null || settings.MonitorTasks.Count == 0)
         {
-            errors.Add("至少需要配置一个监控任务");
+            Log.Warning("未配置DNS监控任务");
         }
         else
         {
             for (int i = 0; i < settings.MonitorTasks.Count; i++)
             {
                 var task = settings.MonitorTasks[i];
-                var prefix = $"任务 #{i + 1} ({task.Name})";
+                var prefix = $"DNS监控任务 #{i + 1} ({task.Name})";
 
                 if (string.IsNullOrEmpty(task.Name))
                     errors.Add($"{prefix}: Name 不能为空");
@@ -177,35 +216,59 @@ class Program
                 }
                 else
                 {
-                    if (string.IsNullOrEmpty(task.IpProvider.Username))
-                        errors.Add($"{prefix}: IpProvider.Username 不能为空");
-
-                    if (string.IsNullOrEmpty(task.IpProvider.Password))
-                        errors.Add($"{prefix}: IpProvider.Password 不能为空");
-
-                    if (task.IpProvider.DeviceGroupId <= 0)
-                        errors.Add($"{prefix}: IpProvider.DeviceGroupId 必须大于0");
-
-                    if (string.IsNullOrEmpty(task.IpProvider.ApiBaseUrl))
-                        errors.Add($"{prefix}: IpProvider.ApiBaseUrl 不能为空");
-
-                    if (!Uri.TryCreate(task.IpProvider.ApiBaseUrl, UriKind.Absolute, out _))
-                        errors.Add($"{prefix}: IpProvider.ApiBaseUrl 必须是有效的URL");
+                    ValidateIpProviderSettings(task.IpProvider, prefix, errors);
                 }
             }
         }
 
-        if (string.IsNullOrEmpty(settings.Cloudflare.ApiToken))
-            errors.Add("Cloudflare ApiToken 不能为空");
+        // 验证套餐监控任务
+        if (settings.SubscriptionMonitorTasks != null && settings.SubscriptionMonitorTasks.Count > 0)
+        {
+            for (int i = 0; i < settings.SubscriptionMonitorTasks.Count; i++)
+            {
+                var task = settings.SubscriptionMonitorTasks[i];
+                var prefix = $"套餐监控任务 #{i + 1} ({task.Name})";
 
-        if (string.IsNullOrEmpty(settings.Cloudflare.ZoneId))
-            errors.Add("Cloudflare ZoneId 不能为空");
+                if (string.IsNullOrEmpty(task.Name))
+                    errors.Add($"{prefix}: Name 不能为空");
 
+                if (task.CheckIntervalHours <= 0)
+                    errors.Add($"{prefix}: CheckIntervalHours 必须大于0");
+
+                if (task.ApiSettings == null)
+                {
+                    errors.Add($"{prefix}: ApiSettings 配置不能为空");
+                }
+                else
+                {
+                    ValidateSubscriptionApiSettings(task.ApiSettings, prefix, errors);
+                }
+            }
+        }
+
+        // 验证Cloudflare配置（仅当有DNS监控任务时需要）
+        if (settings.MonitorTasks != null && settings.MonitorTasks.Count > 0)
+        {
+            if (string.IsNullOrEmpty(settings.Cloudflare.ApiToken))
+                errors.Add("Cloudflare ApiToken 不能为空");
+
+            if (string.IsNullOrEmpty(settings.Cloudflare.ZoneId))
+                errors.Add("Cloudflare ZoneId 不能为空");
+        }
+
+        // 验证Telegram配置
         if (string.IsNullOrEmpty(settings.Telegram.BotToken))
             errors.Add("Telegram BotToken 不能为空");
 
         if (string.IsNullOrEmpty(settings.Telegram.ChatId))
             errors.Add("Telegram ChatId 不能为空");
+
+        // 检查是否至少有一个任务
+        if ((settings.MonitorTasks == null || settings.MonitorTasks.Count == 0) &&
+            (settings.SubscriptionMonitorTasks == null || settings.SubscriptionMonitorTasks.Count == 0))
+        {
+            errors.Add("至少需要配置一个DNS监控任务或套餐监控任务");
+        }
 
         if (errors.Any())
         {
@@ -219,5 +282,38 @@ class Program
         }
 
         return true;
+    }
+
+    private static void ValidateIpProviderSettings(IpProviderSettings ipProvider, string prefix, List<string> errors)
+    {
+        if (string.IsNullOrEmpty(ipProvider.Username))
+            errors.Add($"{prefix}: IpProvider.Username 不能为空");
+
+        if (string.IsNullOrEmpty(ipProvider.Password))
+            errors.Add($"{prefix}: IpProvider.Password 不能为空");
+
+        if (ipProvider.DeviceGroupId <= 0)
+            errors.Add($"{prefix}: IpProvider.DeviceGroupId 必须大于0");
+
+        if (string.IsNullOrEmpty(ipProvider.ApiBaseUrl))
+            errors.Add($"{prefix}: IpProvider.ApiBaseUrl 不能为空");
+
+        if (!Uri.TryCreate(ipProvider.ApiBaseUrl, UriKind.Absolute, out _))
+            errors.Add($"{prefix}: IpProvider.ApiBaseUrl 必须是有效的URL");
+    }
+
+    private static void ValidateSubscriptionApiSettings(SubscriptionApiSettings apiSettings, string prefix, List<string> errors)
+    {
+        if (string.IsNullOrEmpty(apiSettings.Username))
+            errors.Add($"{prefix}: ApiSettings.Username 不能为空");
+
+        if (string.IsNullOrEmpty(apiSettings.Password))
+            errors.Add($"{prefix}: ApiSettings.Password 不能为空");
+
+        if (string.IsNullOrEmpty(apiSettings.ApiBaseUrl))
+            errors.Add($"{prefix}: ApiSettings.ApiBaseUrl 不能为空");
+
+        if (!Uri.TryCreate(apiSettings.ApiBaseUrl, UriKind.Absolute, out _))
+            errors.Add($"{prefix}: ApiSettings.ApiBaseUrl 必须是有效的URL");
     }
 }
