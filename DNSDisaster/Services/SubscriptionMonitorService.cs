@@ -9,6 +9,7 @@ public interface ISubscriptionMonitorService
 {
     Task CheckSubscriptionStatusAsync(SubscriptionApiSettings settings, string taskName);
     Task StartMonitoringAsync(SubscriptionMonitorTask task);
+    void Stop();
 }
 
 public class SubscriptionMonitorService : ISubscriptionMonitorService
@@ -18,6 +19,7 @@ public class SubscriptionMonitorService : ISubscriptionMonitorService
     private readonly ILogger<SubscriptionMonitorService> _logger;
     private readonly Dictionary<string, DateTime> _lastNotificationTime = new();
     private readonly TimeSpan _notificationCooldown = TimeSpan.FromHours(24); // 24小时内不重复通知
+    private CancellationTokenSource? _cancellationTokenSource;
 
     public SubscriptionMonitorService(
         HttpClient httpClient,
@@ -35,21 +37,41 @@ public class SubscriptionMonitorService : ISubscriptionMonitorService
 
     public async Task StartMonitoringAsync(SubscriptionMonitorTask task)
     {
+        _cancellationTokenSource = new CancellationTokenSource();
+        var cancellationToken = _cancellationTokenSource.Token;
+        
         _logger.LogInformation("[{TaskName}] 启动套餐监控服务，检查间隔: {Interval} 小时", task.Name, task.CheckIntervalHours);
         
-        while (true)
+        try
         {
-            try
+            while (!cancellationToken.IsCancellationRequested)
             {
-                await CheckSubscriptionStatusAsync(task.ApiSettings, task.Name);
-                await Task.Delay(TimeSpan.FromHours(task.CheckIntervalHours));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[{TaskName}] 套餐监控循环发生异常", task.Name);
-                await Task.Delay(TimeSpan.FromMinutes(10)); // 出错后等待10分钟再重试
+                try
+                {
+                    await CheckSubscriptionStatusAsync(task.ApiSettings, task.Name);
+                    await Task.Delay(TimeSpan.FromHours(task.CheckIntervalHours), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger.LogInformation("[{TaskName}] 套餐监控服务收到取消信号", task.Name);
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "[{TaskName}] 套餐监控循环发生异常", task.Name);
+                    await Task.Delay(TimeSpan.FromMinutes(10), cancellationToken);
+                }
             }
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("[{TaskName}] 套餐监控服务已停止", task.Name);
+        }
+    }
+
+    public void Stop()
+    {
+        _cancellationTokenSource?.Cancel();
     }
 
     public async Task CheckSubscriptionStatusAsync(SubscriptionApiSettings settings, string taskName)

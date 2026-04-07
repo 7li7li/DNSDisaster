@@ -11,6 +11,7 @@ namespace DNSDisaster;
 class Program
 {
     private static List<DnsMonitoringService> _monitoringServices = new();
+    private static List<ISubscriptionMonitorService> _subscriptionServices = new();
     
     static async Task Main(string[] args)
     {
@@ -101,24 +102,103 @@ class Program
                 var serviceProvider = services.BuildServiceProvider();
                 
                 var subscriptionService = serviceProvider.GetRequiredService<ISubscriptionMonitorService>();
+                _subscriptionServices.Add(subscriptionService);
                 
                 // 启动套餐监控任务
                 tasks.Add(Task.Run(async () => await subscriptionService.StartMonitoringAsync(task)));
             }
             
+            // 检查是否有任务启动
+            if (tasks.Count == 0)
+            {
+                Log.Error("没有启动任何任务，请检查配置");
+                Console.WriteLine("错误: 没有启动任何任务，请检查配置文件");
+                Console.WriteLine("按任意键退出...");
+                Console.ReadKey();
+                return;
+            }
+            
+            Log.Information("已启动 {Count} 个监控任务", tasks.Count);
+            
             // 处理Ctrl+C优雅退出
+            var cancellationTokenSource = new CancellationTokenSource();
+            var exitRequested = false;
+            
             Console.CancelKeyPress += (sender, e) =>
             {
+                if (exitRequested)
+                {
+                    // 第二次按Ctrl+C，强制退出
+                    Log.Warning("强制退出程序");
+                    Environment.Exit(0);
+                }
+                
                 e.Cancel = true;
+                exitRequested = true;
                 Log.Information("收到退出信号，正在停止所有服务...");
+                
+                // 停止DNS监控服务
                 foreach (var service in _monitoringServices)
                 {
-                    service.Stop();
+                    try
+                    {
+                        service.Stop();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "停止DNS监控服务时发生错误");
+                    }
                 }
+                
+                // 停止套餐监控服务
+                foreach (var service in _subscriptionServices)
+                {
+                    try
+                    {
+                        service.Stop();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex, "停止套餐监控服务时发生错误");
+                    }
+                }
+                
+                // 触发取消令牌
+                cancellationTokenSource.Cancel();
+                
+                Log.Information("提示: 再次按 Ctrl+C 可强制退出");
             };
 
-            // 等待所有任务完成
-            await Task.WhenAll(tasks);
+            // 等待所有任务完成或取消
+            try
+            {
+                // 正常运行时不使用超时，只等待取消信号
+                await Task.WhenAll(tasks).WaitAsync(cancellationTokenSource.Token);
+                Log.Information("所有任务已正常完成");
+            }
+            catch (OperationCanceledException)
+            {
+                Log.Information("所有任务已取消");
+                
+                // 等待任务清理，最多等待5秒
+                try
+                {
+                    using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await Task.WhenAll(tasks).WaitAsync(timeoutCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    Log.Information("任务清理完成");
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "等待任务清理时发生错误");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "任务执行过程中发生错误");
+            }
         }
         catch (Exception ex)
         {
