@@ -161,42 +161,47 @@ public class SubscriptionMonitorService : ISubscriptionMonitorService
     {
         var warnings = new List<string>();
         var isUrgent = false;
+        var daysUntilExpire = 0.0;
+        var trafficUsagePercent = 0.0;
 
         // 检查套餐到期时间
         if (userInfo.ExpireTime.HasValue)
         {
-            var daysUntilExpire = (userInfo.ExpireTime.Value - DateTime.Now).TotalDays;
-            if (daysUntilExpire <= 7)
+            daysUntilExpire = (userInfo.ExpireTime.Value - DateTime.Now).TotalDays;
+            if (daysUntilExpire <= 3)
             {
-                warnings.Add($"⏰ 套餐将在 {daysUntilExpire:F1} 天后到期（{userInfo.ExpireTime.Value:yyyy-MM-dd HH:mm:ss}）");
+                warnings.Add($"⚠️ 套餐将在 {daysUntilExpire:F1} 天后到期");
                 isUrgent = true;
             }
-            else if (daysUntilExpire <= 14)
+            else if (daysUntilExpire <= 7)
             {
-                warnings.Add($"⏰ 套餐将在 {daysUntilExpire:F1} 天后到期（{userInfo.ExpireTime.Value:yyyy-MM-dd HH:mm:ss}）");
+                warnings.Add($"⚠️ 套餐将在 {daysUntilExpire:F1} 天后到期");
             }
         }
 
         // 检查流量使用情况
         if (userInfo.TotalTraffic > 0)
         {
-            var trafficUsagePercent = (userInfo.UsedTraffic / userInfo.TotalTraffic) * 100;
+            trafficUsagePercent = (userInfo.UsedTraffic / userInfo.TotalTraffic) * 100;
             if (trafficUsagePercent >= 90)
             {
-                warnings.Add($"📊 流量已使用 {trafficUsagePercent:F1}% ({userInfo.UsedTraffic:F2}/{userInfo.TotalTraffic:F2} GB)");
+                warnings.Add($"⚠️ 流量即将用尽");
                 isUrgent = true;
             }
             else if (trafficUsagePercent >= 80)
             {
-                warnings.Add($"📊 流量已使用 {trafficUsagePercent:F1}% ({userInfo.UsedTraffic:F2}/{userInfo.TotalTraffic:F2} GB)");
+                warnings.Add($"⚠️ 流量使用较高");
             }
         }
 
-        // 检查余额是否足够续费
+        // 检查余额是否足够续费（只有在套餐快到期或流量不足时才警告余额）
         if (userInfo.RenewalPrice > 0 && userInfo.Balance < userInfo.RenewalPrice)
         {
-            warnings.Add($"💰 余额不足：当前余额 {userInfo.Balance:F2} 元，续费需要 {userInfo.RenewalPrice:F2} 元");
-            isUrgent = true;
+            if (daysUntilExpire <= 3 || trafficUsagePercent >= 90)
+            {
+                warnings.Add($"⚠️ 余额不足以续费");
+                isUrgent = true;
+            }
         }
 
         // 如果有警告且需要通知
@@ -214,18 +219,36 @@ public class SubscriptionMonitorService : ISubscriptionMonitorService
                 }
             }
 
-            // 构建通知消息，始终包含流量信息
-            var trafficInfo = userInfo.TotalTraffic > 0 
-                ? $"📊 流量使用: {userInfo.UsedTraffic:F2}/{userInfo.TotalTraffic:F2} GB ({(userInfo.UsedTraffic / userInfo.TotalTraffic * 100):F1}%)"
-                : "📊 流量使用: 无数据";
-
-            var message = $"⚠️ 套餐状态警告 [{taskName}]\n" +
-                         $"👤 用户: {userInfo.Username}\n" +
-                         $"📦 套餐: {userInfo.PlanName}\n" +
-                         $"{trafficInfo}\n\n" + 
-                         string.Join("\n", warnings);
+            // 构建完整的通知消息，始终包含所有信息
+            var messageBuilder = new System.Text.StringBuilder();
+            messageBuilder.AppendLine($"⚠️ 套餐状态警告 [{taskName}]");
+            messageBuilder.AppendLine($"👤 用户: {userInfo.Username}");
+            messageBuilder.AppendLine($"📦 套餐: {userInfo.PlanName}");
             
-            await _telegramService.SendNotificationAsync(message);
+            // 到期时间
+            if (userInfo.ExpireTime.HasValue)
+            {
+                messageBuilder.AppendLine($"⏰ 到期时间: {userInfo.ExpireTime.Value:yyyy-MM-dd HH:mm:ss} (剩余 {daysUntilExpire:F1} 天)");
+            }
+            
+            // 流量信息
+            if (userInfo.TotalTraffic > 0)
+            {
+                messageBuilder.AppendLine($"📊 流量使用: {userInfo.UsedTraffic:F2}/{userInfo.TotalTraffic:F2} GB ({trafficUsagePercent:F1}%)");
+            }
+            
+            // 余额信息
+            messageBuilder.AppendLine($"💰 余额: {userInfo.Balance:F2} 元 (续费需要 {userInfo.RenewalPrice:F2} 元)");
+            
+            // 添加警告详情
+            messageBuilder.AppendLine();
+            messageBuilder.AppendLine("告警详情:");
+            foreach (var warning in warnings)
+            {
+                messageBuilder.AppendLine(warning);
+            }
+
+            await _telegramService.SendNotificationAsync(messageBuilder.ToString());
             
             _lastNotificationTime[notificationKey] = DateTime.Now;
             _logger.LogInformation("[{TaskName}] 已发送套餐警告通知", taskName);

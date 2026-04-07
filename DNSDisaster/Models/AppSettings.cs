@@ -11,6 +11,7 @@ public class AppSettings
 public class MonitorTask
 {
     public string Name { get; set; } = string.Empty;
+    public bool Enabled { get; set; } = true;
     public string PrimaryDomain { get; set; } = string.Empty;
     public int PrimaryPort { get; set; }
     public string BackupDomain { get; set; } = string.Empty;
@@ -22,6 +23,7 @@ public class MonitorTask
 public class SubscriptionMonitorTask
 {
     public string Name { get; set; } = string.Empty;
+    public bool Enabled { get; set; } = true;
     public int CheckIntervalHours { get; set; } = 6;
     public SubscriptionApiSettings ApiSettings { get; set; } = new();
 }

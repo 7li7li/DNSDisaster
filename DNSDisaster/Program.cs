@@ -64,6 +64,12 @@ class Program
             
             foreach (var task in appSettings.MonitorTasks)
             {
+                if (!task.Enabled)
+                {
+                    Log.Information("跳过已禁用的DNS监控任务: {TaskName}", task.Name);
+                    continue;
+                }
+
                 Log.Information("初始化DNS监控任务: {TaskName} - {Domain}", task.Name, task.PrimaryDomain);
                 
                 // 为每个任务创建独立的服务提供者
@@ -81,6 +87,12 @@ class Program
             // 为每个套餐监控任务创建监控服务
             foreach (var task in appSettings.SubscriptionMonitorTasks)
             {
+                if (!task.Enabled)
+                {
+                    Log.Information("跳过已禁用的套餐监控任务: {TaskName}", task.Name);
+                    continue;
+                }
+
                 Log.Information("初始化套餐监控任务: {TaskName}", task.Name);
                 
                 // 为每个任务创建独立的服务提供者
@@ -268,6 +280,22 @@ class Program
             (settings.SubscriptionMonitorTasks == null || settings.SubscriptionMonitorTasks.Count == 0))
         {
             errors.Add("至少需要配置一个DNS监控任务或套餐监控任务");
+        }
+        else
+        {
+            // 检查是否至少有一个启用的任务
+            var enabledDnsTasks = settings.MonitorTasks?.Count(t => t.Enabled) ?? 0;
+            var enabledSubTasks = settings.SubscriptionMonitorTasks?.Count(t => t.Enabled) ?? 0;
+            
+            if (enabledDnsTasks == 0 && enabledSubTasks == 0)
+            {
+                errors.Add("至少需要启用一个DNS监控任务或套餐监控任务（设置 Enabled: true）");
+            }
+            else
+            {
+                Log.Information("已启用 {DnsCount} 个DNS监控任务，{SubCount} 个套餐监控任务", 
+                    enabledDnsTasks, enabledSubTasks);
+            }
         }
 
         if (errors.Any())
