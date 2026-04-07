@@ -3,6 +3,7 @@ namespace DNSDisaster.Models;
 public class AppSettings
 {
     public List<MonitorTask> MonitorTasks { get; set; } = new();
+    public List<DnsFailoverTask> DnsFailoverTasks { get; set; } = new();
     public List<SubscriptionMonitorTask> SubscriptionMonitorTasks { get; set; } = new();
     public CloudflareSettings Cloudflare { get; set; } = new();
     public TelegramSettings Telegram { get; set; } = new();
@@ -18,6 +19,18 @@ public class MonitorTask
     public int CheckIntervalSeconds { get; set; } = 30;
     public int FailureThreshold { get; set; } = 3;
     public IpProviderSettings IpProvider { get; set; } = new();
+}
+
+public class DnsFailoverTask
+{
+    public string Name { get; set; } = string.Empty;
+    public bool Enabled { get; set; } = true;
+    public string PrimaryDomain { get; set; } = string.Empty;
+    public string Ip { get; set; } = string.Empty;
+    public int PrimaryPort { get; set; }
+    public string BackupDomain { get; set; } = string.Empty;
+    public int CheckIntervalSeconds { get; set; } = 30;
+    public int FailureThreshold { get; set; } = 3;
 }
 
 public class SubscriptionMonitorTask

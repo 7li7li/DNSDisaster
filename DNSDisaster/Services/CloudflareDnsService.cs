@@ -20,13 +20,13 @@ public class CloudflareDnsService : ICloudflareService
     private readonly string _recordName;
     private readonly ILogger<CloudflareDnsService> _logger;
 
-    public CloudflareDnsService(HttpClient httpClient, CloudflareSettings settings, MonitorTask task, ILogger<CloudflareDnsService> logger)
+    public CloudflareDnsService(HttpClient httpClient, CloudflareSettings settings, string recordName, ILogger<CloudflareDnsService> logger)
     {
         _httpClient = httpClient;
         _settings = settings;
-        _recordName = task.PrimaryDomain;
+        _recordName = recordName;
         _logger = logger;
-        
+
         _httpClient.BaseAddress = new Uri("https://api.cloudflare.com/client/v4/");
         _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {settings.ApiToken}");
     }
