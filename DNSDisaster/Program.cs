@@ -413,11 +413,7 @@ class Program
         var hasDnsTasks = (settings.MonitorTasks?.Count ?? 0) > 0 || (settings.DnsFailoverTasks?.Count ?? 0) > 0;
         if (hasDnsTasks)
         {
-            if (string.IsNullOrEmpty(settings.Cloudflare.ApiToken))
-                errors.Add("Cloudflare ApiToken 不能为空");
-
-            if (string.IsNullOrEmpty(settings.Cloudflare.ZoneId))
-                errors.Add("Cloudflare ZoneId 不能为空");
+            ValidateCloudflareSettings(settings, errors);
         }
 
         if (string.IsNullOrEmpty(settings.Telegram.BotToken))
@@ -479,6 +475,31 @@ class Program
 
         if (!Uri.TryCreate(ipProvider.ApiBaseUrl, UriKind.Absolute, out _))
             errors.Add($"{prefix}: IpProvider.ApiBaseUrl 必须是有效的URL");
+    }
+
+    private static void ValidateCloudflareSettings(AppSettings settings, List<string> errors)
+    {
+        var domains = settings.Cloudflare.Domains ?? new List<CloudflareDomainSettings>();
+        if (domains.Count == 0)
+        {
+            errors.Add("Cloudflare.Domains 不能为空");
+            return;
+        }
+
+        for (int i = 0; i < domains.Count; i++)
+        {
+            var domainSetting = domains[i];
+            var prefix = $"Cloudflare.Domains[{i}]";
+
+            if (string.IsNullOrWhiteSpace(domainSetting.Domain))
+                errors.Add($"{prefix}.Domain 不能为空");
+
+            if (string.IsNullOrWhiteSpace(domainSetting.ApiToken))
+                errors.Add($"{prefix}.ApiToken 不能为空");
+
+            if (string.IsNullOrWhiteSpace(domainSetting.ZoneId))
+                errors.Add($"{prefix}.ZoneId 不能为空");
+        }
     }
 
     private static void ValidateSubscriptionApiSettings(SubscriptionApiSettings apiSettings, string prefix, List<string> errors)

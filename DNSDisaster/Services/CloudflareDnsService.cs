@@ -16,19 +16,21 @@ public interface ICloudflareService
 public class CloudflareDnsService : ICloudflareService
 {
     private readonly HttpClient _httpClient;
-    private readonly CloudflareSettings _settings;
     private readonly string _recordName;
+    private readonly string _zoneId;
     private readonly ILogger<CloudflareDnsService> _logger;
 
     public CloudflareDnsService(HttpClient httpClient, CloudflareSettings settings, string recordName, ILogger<CloudflareDnsService> logger)
     {
         _httpClient = httpClient;
-        _settings = settings;
         _recordName = recordName;
         _logger = logger;
 
+        var domainSettings = ResolveDomainSettings(settings, recordName);
+        _zoneId = domainSettings.ZoneId;
+
         _httpClient.BaseAddress = new Uri("https://api.cloudflare.com/client/v4/");
-        _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {settings.ApiToken}");
+        _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {domainSettings.ApiToken}");
     }
 
     public async Task<bool> SwitchToCnameAsync(string targetDomain)
@@ -51,7 +53,7 @@ public class CloudflareDnsService : ICloudflareService
                 type = "CNAME",
                 name = _recordName,
                 content = targetDomain,
-                ttl = 300
+                ttl = 1
             };
 
             var success = await CreateDnsRecordAsync(cnameRecord);
@@ -94,7 +96,7 @@ public class CloudflareDnsService : ICloudflareService
                 type = "A",
                 name = _recordName,
                 content = ipAddress,
-                ttl = 300
+                ttl = 1
             };
 
             var success = await CreateDnsRecordAsync(aRecord);
@@ -149,7 +151,7 @@ public class CloudflareDnsService : ICloudflareService
     {
         try
         {
-            var response = await _httpClient.GetAsync($"zones/{_settings.ZoneId}/dns_records?name={_recordName}");
+            var response = await _httpClient.GetAsync($"zones/{_zoneId}/dns_records?name={_recordName}");
             
             if (!response.IsSuccessStatusCode)
             {
@@ -176,7 +178,7 @@ public class CloudflareDnsService : ICloudflareService
     {
         try
         {
-            var response = await _httpClient.DeleteAsync($"zones/{_settings.ZoneId}/dns_records/{recordId}");
+            var response = await _httpClient.DeleteAsync($"zones/{_zoneId}/dns_records/{recordId}");
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -194,10 +196,10 @@ public class CloudflareDnsService : ICloudflareService
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             });
-            
+
             var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = await _httpClient.PostAsync($"zones/{_settings.ZoneId}/dns_records", content);
-            
+            var response = await _httpClient.PostAsync($"zones/{_zoneId}/dns_records", content);
+
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
@@ -212,6 +214,31 @@ public class CloudflareDnsService : ICloudflareService
             _logger.LogError(ex, "创建DNS记录时发生异常");
             return false;
         }
+    }
+
+    private static CloudflareDomainSettings ResolveDomainSettings(CloudflareSettings settings, string recordName)
+    {
+        if (settings.Domains == null || settings.Domains.Count == 0)
+        {
+            throw new InvalidOperationException("Cloudflare.Domains 配置不能为空");
+        }
+
+        var matched = settings.Domains
+            .Where(d =>
+                !string.IsNullOrWhiteSpace(d.Domain) &&
+                !string.IsNullOrWhiteSpace(d.ApiToken) &&
+                !string.IsNullOrWhiteSpace(d.ZoneId))
+            .OrderByDescending(d => d.Domain.Length)
+            .FirstOrDefault(d =>
+                recordName.Equals(d.Domain, StringComparison.OrdinalIgnoreCase) ||
+                recordName.EndsWith($".{d.Domain}", StringComparison.OrdinalIgnoreCase));
+
+        if (matched == null)
+        {
+            throw new InvalidOperationException($"域名 {recordName} 未匹配到任何 Cloudflare.Domains 配置");
+        }
+
+        return matched;
     }
 }
 

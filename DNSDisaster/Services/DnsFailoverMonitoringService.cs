@@ -17,6 +17,27 @@ public class DnsFailoverMonitoringService
     private bool _hasCheckedDnsConsistency = false;
     private readonly CancellationTokenSource _cancellationTokenSource = new();
 
+    // 错误通知节流
+    private readonly Dictionary<string, (DateTime LastNotified, int SuppressedCount)> _errorThrottle = new();
+    private static readonly TimeSpan ErrorNotifyCooldown = TimeSpan.FromMinutes(30);
+
+    // 切换API失败重试计数：连续失败超过阈值后停止重试
+    private readonly Dictionary<string, int> _switchFailCount = new();
+    private const int MaxSwitchRetries = 3;
+
+    private bool IsSwitchRetryExceeded(string switchKey, string switchName)
+    {
+        var count = _switchFailCount.GetValueOrDefault(switchKey, 0);
+        if (count >= MaxSwitchRetries)
+        {
+            _logger.LogDebug("[{TaskName}] {SwitchName} 已达最大重试次数({Max})，停止重试",
+                _task.Name, switchName, MaxSwitchRetries);
+            return true;
+        }
+
+        return false;
+    }
+
     public DnsFailoverMonitoringService(
         ITcpPingService tcpPingService,
         ICloudflareService cloudflareService,
@@ -63,7 +84,7 @@ public class DnsFailoverMonitoringService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[{TaskName}] 监控循环中发生异常", _task.Name);
-                await _telegramService.SendErrorNotificationAsync($"[{_task.Name}] DNS容灾监控循环异常: {ex.Message}");
+                await SendThrottledErrorAsync("loop_exception", $"[{_task.Name}] DNS容灾监控循环异常: {ex.Message}");
                 await Task.Delay(TimeSpan.FromSeconds(_task.CheckIntervalSeconds), cancellationToken);
             }
         }
@@ -82,6 +103,11 @@ public class DnsFailoverMonitoringService
             {
                 _logger.LogInformation("[{TaskName}] 连接恢复，重置失败计数", _task.Name);
                 _consecutiveFailures = 0;
+                // IP 恢复可达，清除切换失败的节流状态，允许重新尝试切换
+                _errorThrottle.Remove("switch_a_fail");
+                _errorThrottle.Remove("switch_cname_fail");
+                _switchFailCount.Remove("switch_a_fail");
+                _switchFailCount.Remove("switch_cname_fail");
             }
 
             if (!_hasCheckedDnsConsistency)
@@ -103,9 +129,8 @@ public class DnsFailoverMonitoringService
                 {
                     _logger.LogDebug("[{TaskName}] 主域名IP一致: {IpAddress}，无需更新", _task.Name, _task.Ip);
                     _currentState = DnsRecordState.ARecord;
+                    _hasCheckedDnsConsistency = true;
                 }
-
-                _hasCheckedDnsConsistency = true;
             }
 
             return;
@@ -124,6 +149,12 @@ public class DnsFailoverMonitoringService
 
     private async Task SwitchToARecordAsync(string ipAddress, string reason)
     {
+        if (IsSwitchRetryExceeded("switch_a_fail", "切换A记录"))
+        {
+            _hasCheckedDnsConsistency = true;
+            return;
+        }
+
         try
         {
             _logger.LogInformation("[{TaskName}] 准备切换到A记录: IP={IpAddress}, 原因={Reason}", _task.Name, ipAddress, reason);
@@ -133,6 +164,9 @@ public class DnsFailoverMonitoringService
             if (success)
             {
                 _currentState = DnsRecordState.ARecord;
+                _hasCheckedDnsConsistency = true;
+                _errorThrottle.Remove("switch_a_fail");
+                _switchFailCount.Remove("switch_a_fail");
                 await _telegramService.SendNotificationAsync(
                     $"✅ DNS容灾记录已更新\n\n" +
                     $"任务: {_task.Name}\n" +
@@ -144,19 +178,28 @@ public class DnsFailoverMonitoringService
             }
             else
             {
+                _hasCheckedDnsConsistency = true;
+                _switchFailCount["switch_a_fail"] = _switchFailCount.GetValueOrDefault("switch_a_fail", 0) + 1;
                 _logger.LogError("[{TaskName}] 切换到A记录失败", _task.Name);
-                await _telegramService.SendErrorNotificationAsync($"[{_task.Name}] DNS容灾切换到A记录失败: {ipAddress}");
+                await SendThrottledErrorAsync("switch_a_fail", $"[{_task.Name}] DNS容灾切换到A记录失败: {ipAddress}");
             }
         }
         catch (Exception ex)
         {
+            _hasCheckedDnsConsistency = true;
+            _switchFailCount["switch_a_fail"] = _switchFailCount.GetValueOrDefault("switch_a_fail", 0) + 1;
             _logger.LogError(ex, "[{TaskName}] 切换到A记录时发生异常", _task.Name);
-            await _telegramService.SendErrorNotificationAsync($"[{_task.Name}] DNS容灾切换A记录异常: {ex.Message}");
+            await SendThrottledErrorAsync("switch_a_fail", $"[{_task.Name}] DNS容灾切换A记录异常: {ex.Message}");
         }
     }
 
     private async Task SwitchToCnameAsync()
     {
+        if (IsSwitchRetryExceeded("switch_cname_fail", "切换CNAME"))
+        {
+            return;
+        }
+
         try
         {
             if (_currentState == DnsRecordState.CnameRecord)
@@ -173,6 +216,8 @@ public class DnsFailoverMonitoringService
             {
                 _currentState = DnsRecordState.CnameRecord;
                 _hasCheckedDnsConsistency = false;
+                _errorThrottle.Remove("switch_cname_fail");
+                _switchFailCount.Remove("switch_cname_fail");
                 await _telegramService.SendNotificationAsync(
                     $"⚠️ DNS容灾已触发\n\n" +
                     $"任务: {_task.Name}\n" +
@@ -184,14 +229,45 @@ public class DnsFailoverMonitoringService
             }
             else
             {
+                _currentState = DnsRecordState.CnameRecord;
+                _switchFailCount["switch_cname_fail"] = _switchFailCount.GetValueOrDefault("switch_cname_fail", 0) + 1;
                 _logger.LogError("[{TaskName}] 切换到CNAME失败", _task.Name);
-                await _telegramService.SendErrorNotificationAsync($"[{_task.Name}] DNS容灾切换到备用域名失败");
+                await SendThrottledErrorAsync("switch_cname_fail", $"[{_task.Name}] DNS容灾切换到备用域名失败，将在冷却后重试");
             }
         }
         catch (Exception ex)
         {
+            _currentState = DnsRecordState.CnameRecord;
+            _switchFailCount["switch_cname_fail"] = _switchFailCount.GetValueOrDefault("switch_cname_fail", 0) + 1;
             _logger.LogError(ex, "[{TaskName}] 切换到CNAME时发生异常", _task.Name);
-            await _telegramService.SendErrorNotificationAsync($"[{_task.Name}] DNS容灾切换异常: {ex.Message}");
+            await SendThrottledErrorAsync("switch_cname_fail", $"[{_task.Name}] DNS容灾切换异常: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 节流错误通知：同类错误在冷却窗口内只发送一次，冷却到期发送时附带静默期内累计次数。
+    /// </summary>
+    private async Task SendThrottledErrorAsync(string errorKey, string message)
+    {
+        var now = DateTime.Now;
+
+        if (_errorThrottle.TryGetValue(errorKey, out var entry))
+        {
+            if (now - entry.LastNotified < ErrorNotifyCooldown)
+            {
+                _errorThrottle[errorKey] = (entry.LastNotified, entry.SuppressedCount + 1);
+                _logger.LogWarning("[{TaskName}] 错误通知已节流 ({ErrorKey})，冷却剩余 {Remaining:F0}s",
+                    _task.Name, errorKey, (ErrorNotifyCooldown - (now - entry.LastNotified)).TotalSeconds);
+                return;
+            }
+
+            if (entry.SuppressedCount > 0)
+            {
+                message += $"\n（冷却期内已静默 {entry.SuppressedCount} 次）";
+            }
+        }
+
+        _errorThrottle[errorKey] = (now, 0);
+        await _telegramService.SendErrorNotificationAsync(message);
     }
 }

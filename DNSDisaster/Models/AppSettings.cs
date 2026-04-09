@@ -43,6 +43,12 @@ public class SubscriptionMonitorTask
 
 public class CloudflareSettings
 {
+    public List<CloudflareDomainSettings> Domains { get; set; } = new();
+}
+
+public class CloudflareDomainSettings
+{
+    public string Domain { get; set; } = string.Empty;
     public string ApiToken { get; set; } = string.Empty;
     public string ZoneId { get; set; } = string.Empty;
 }
