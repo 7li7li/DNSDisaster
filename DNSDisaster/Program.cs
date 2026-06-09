@@ -61,6 +61,9 @@ class Program
                 appSettings.SubscriptionMonitorTasks.Count);
 
             var tasks = new List<Task>();
+            var startedDnsMonitoringTasks = 0;
+            var startedDnsFailoverTasks = 0;
+            var startedSubscriptionTasks = 0;
 
             foreach (var task in appSettings.MonitorTasks)
             {
@@ -79,6 +82,7 @@ class Program
                 var monitoringService = serviceProvider.GetRequiredService<DnsMonitoringService>();
                 _monitoringServices.Add(monitoringService);
                 tasks.Add(Task.Run(async () => await monitoringService.StartMonitoringAsync()));
+                startedDnsMonitoringTasks++;
             }
 
             foreach (var task in appSettings.DnsFailoverTasks)
@@ -99,6 +103,7 @@ class Program
                 var failoverService = serviceProvider.GetRequiredService<DnsFailoverMonitoringService>();
                 _dnsFailoverServices.Add(failoverService);
                 tasks.Add(Task.Run(async () => await failoverService.StartMonitoringAsync()));
+                startedDnsFailoverTasks++;
             }
 
             foreach (var task in appSettings.SubscriptionMonitorTasks)
@@ -118,6 +123,7 @@ class Program
                 var subscriptionService = serviceProvider.GetRequiredService<ISubscriptionMonitorService>();
                 _subscriptionServices.Add(subscriptionService);
                 tasks.Add(Task.Run(async () => await subscriptionService.StartMonitoringAsync(task)));
+                startedSubscriptionTasks++;
             }
 
             if (tasks.Count == 0)
@@ -130,6 +136,11 @@ class Program
             }
 
             Log.Information("已启动 {Count} 个监控任务", tasks.Count);
+            await SendStartupNotificationAsync(
+                appSettings,
+                startedDnsMonitoringTasks,
+                startedDnsFailoverTasks,
+                startedSubscriptionTasks);
 
             var cancellationTokenSource = new CancellationTokenSource();
             var exitRequested = false;
@@ -228,6 +239,41 @@ class Program
 
         Console.WriteLine("按任意键退出...");
         Console.ReadKey();
+    }
+
+    private static async Task SendStartupNotificationAsync(
+        AppSettings appSettings,
+        int dnsMonitoringTaskCount,
+        int dnsFailoverTaskCount,
+        int subscriptionTaskCount)
+    {
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddLogging(builder =>
+            {
+                builder.ClearProviders();
+                builder.AddSerilog(dispose: false);
+            });
+            services.AddHttpClient();
+            services.AddSingleton(appSettings.Telegram);
+            services.AddSingleton<ITelegramNotificationService, TelegramNotificationService>();
+
+            using var serviceProvider = services.BuildServiceProvider();
+            var telegramService = serviceProvider.GetRequiredService<ITelegramNotificationService>();
+
+            var message = $"🚀 DNS灾难恢复系统已启动\n" +
+                          $"DNS监控任务: {dnsMonitoringTaskCount}\n" +
+                          $"DNS容灾任务: {dnsFailoverTaskCount}\n" +
+                          $"套餐监控任务: {subscriptionTaskCount}\n" +
+                          $"总任务数: {dnsMonitoringTaskCount + dnsFailoverTaskCount + subscriptionTaskCount}";
+
+            await telegramService.SendNotificationAsync(message);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "发送系统启动Telegram通知失败");
+        }
     }
 
     private static void ConfigureDnsMonitoringServices(IServiceCollection services, AppSettings appSettings, MonitorTask task)
