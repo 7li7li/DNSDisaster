@@ -32,6 +32,7 @@
       "PrimaryDomain": "your-domain.com",
       "PrimaryPort": 12345,
       "BackupDomain": "backup-domain.com",
+      "BackupDomainEnabled": true,
       "CheckIntervalSeconds": 30,
       "FailureThreshold": 3,
       "IpProvider": {
@@ -95,6 +96,7 @@ chmod +x DNSDisaster
       "PrimaryDomain": "domain1.com",
       "PrimaryPort": 12345,
       "BackupDomain": "backup1.com",
+      "BackupDomainEnabled": true,
       "CheckIntervalSeconds": 30,
       "FailureThreshold": 3,
       "IpProvider": {
@@ -110,6 +112,7 @@ chmod +x DNSDisaster
       "PrimaryDomain": "domain2.com",
       "PrimaryPort": 23456,
       "BackupDomain": "backup2.com",
+      "BackupDomainEnabled": true,
       "CheckIntervalSeconds": 30,
       "FailureThreshold": 3,
       "IpProvider": {
@@ -141,6 +144,7 @@ chmod +x DNSDisaster
 | PrimaryDomain | 要监控的主域名 | example.com |
 | PrimaryPort | TCPing检测的目标端口 | 12345 |
 | BackupDomain | 故障时切换的备用域名 | backup.example.com |
+| BackupDomainEnabled | 是否启用备用域名故障转移 | true |
 | CheckIntervalSeconds | 检测间隔（秒） | 30 |
 | FailureThreshold | 触发故障转移的失败次数 | 3 |
 | EnableDnsMonitoring | 是否启用DNS容灾监控 | true |

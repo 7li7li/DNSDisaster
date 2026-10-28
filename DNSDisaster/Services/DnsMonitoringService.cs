@@ -177,7 +177,14 @@ public class DnsMonitoringService
 
             if (_consecutiveFailures >= _task.FailureThreshold)
             {
-                await SwitchToCnameAsync();
+                if (_task.BackupDomainEnabled)
+                {
+                    await SwitchToCnameAsync();
+                }
+                else
+                {
+                    _logger.LogWarning("[{TaskName}] 备用域名切换已禁用，跳过故障转移", _task.Name);
+                }
                 _consecutiveFailures = 0;
             }
         }

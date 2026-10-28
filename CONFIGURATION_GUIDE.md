@@ -20,6 +20,7 @@
       "PrimaryDomain": "example.com",
       "PrimaryPort": 12345,
       "BackupDomain": "backup.example.com",
+      "BackupDomainEnabled": true,
       "CheckIntervalSeconds": 30,
       "FailureThreshold": 3,
       "IpProvider": {
@@ -71,6 +72,7 @@
 | PrimaryDomain | string | �?| 主域�?| "example.com" |
 | PrimaryPort | int | �?| 检测端�?| 12345 |
 | BackupDomain | string | �?| 备用域名 | "backup.example.com" |
+| BackupDomainEnabled | bool | �?| 是否启用备用域名故障转移 | true |
 | CheckIntervalSeconds | int | �?| 检测间隔（秒） | 30 |
 | FailureThreshold | int | �?| 故障转移阈�?| 3 |
 | IpProvider | object | �?| IP提供商配�?| 见下�?|

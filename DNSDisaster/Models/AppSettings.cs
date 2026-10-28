@@ -16,6 +16,7 @@ public class MonitorTask
     public string PrimaryDomain { get; set; } = string.Empty;
     public int PrimaryPort { get; set; }
     public string BackupDomain { get; set; } = string.Empty;
+    public bool BackupDomainEnabled { get; set; } = true;
     public int CheckIntervalSeconds { get; set; } = 30;
     public int FailureThreshold { get; set; } = 3;
     public IpProviderSettings IpProvider { get; set; } = new();

@@ -376,7 +376,7 @@ class Program
                 if (task.PrimaryPort <= 0)
                     errors.Add($"{prefix}: PrimaryPort 必须大于0");
 
-                if (string.IsNullOrEmpty(task.BackupDomain))
+                if (task.BackupDomainEnabled && string.IsNullOrEmpty(task.BackupDomain))
                     errors.Add($"{prefix}: BackupDomain 不能为空");
 
                 if (task.CheckIntervalSeconds <= 0)
